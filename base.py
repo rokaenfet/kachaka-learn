@@ -3,13 +3,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 # from IPython.display import Image, display
 # ip changes everytime check with kachacar
-KACHAKA_HOST = "192.168.118.79"
+KACHAKA_HOST = "192.168.118.158"
 # grpc port
 KACHAKA_PORT = 26400
 
 
 def main():
-    client = kachaka_api.KachakaApiClient("%s:%s" % (KACHAKA_HOST, KACHAKA_PORT))
+    client = kachaka_api.KachakaApiClient(f"{KACHAKA_HOST}:{KACHAKA_PORT}")
     client.set_manual_control_enabled(True) # If true only moves with command
 
     # main velocity
