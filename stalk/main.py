@@ -1,14 +1,6 @@
-import time
 import cv2
-import kachaka_api
-import numpy as np
 import asyncio
-import math
-import matplotlib.patches as patches
-import matplotlib.pyplot as plt
 import keyboard
-import sys
-import cProfile
 
 from funcs import *
 

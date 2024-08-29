@@ -53,8 +53,7 @@ class KachakaFrame():
         await self.move() # move with the updated speed
         await self.emergency_stop() # detect for emergency stops
         await self.human_detection() # detect human
-        # annotate img
-        self.annotate(st)
+        self.annotate(st) # annotate img
 
     
     async def emergency_stop(self):
@@ -76,8 +75,8 @@ class KachakaFrame():
     async def human_detection(self):
         image, (header, objects) = await asyncio.gather(anext(self.stream_i), anext(self.stream_d))
         self.cv_img = cv2.imdecode(np.frombuffer(image.data, dtype=np.uint8), flags=1) # roscompressed to img
-        self.cv_img = undistort(self.cv_img, *self.undistort_map) # undistort
-        self.cv_img = draw_box(self.cv_img, objects) # draw bounding box
+        objects = [n for n in objects if n.label==1]
+        self.cv_img = draw_box(undistort(self.cv_img, *self.undistort_map), objects) # undistort then draw bounding box
         if len(objects) > 0:
             self.target_pos = process_object(objects) #x, y, w, h
             if self.target_pos:
