@@ -21,7 +21,7 @@ async def object_detection(client:kachaka_api.aio.KachakaApiClient):
         pil_img = get_bbox_drawn_image(image, objects)
         clear_output(wait=True)
         cv_img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-        cv2.putText(cv_img, f"fps:{round(time.time()-st)}", (20,80), FONT, 3, WHITE, 2)
+        cv2.putText(cv_img, f"fps:{round(1/(time.time()-st))}", (20,80), FONT, 3, WHITE, 2)
         # for object in objects:
         #     cv2.putText(cv_img, f"{OBJECT_LABEL[object.label]}: {round(object.score,3)}", (200,200),
         #                 FONT, 3, WHITE, 2)
