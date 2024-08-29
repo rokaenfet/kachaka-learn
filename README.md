@@ -19,3 +19,8 @@ Learning kachaka-api
   - cam is laggy even tho fps is high
 - [x] make kachaka move towards a person it sees
 - [x] add face detection pipeline and take a snap of the front side w face in frame
+- [x] asynchronous control of multiple robots
+- [ ] navigation system for multiple robots
+  - set points to go to, or be able to share coordinates between both robots
+- [ ] camera / video setup which displays more continuosly
+- [ ] smoother movement during manual control
