@@ -63,11 +63,11 @@ class KachakaFrame():
         if self.nearest_scan_dist < EMERGENCY_STOP_DISTANCE:
             self.need_to_emergency_stop = True
             print(f"ID:{self.id} has prevented a crash!")
-            # self.sync_client.speak("move")
+            await self.async_client.speak("move")
             self.sync_client.set_robot_velocity(0, 0)
         elif self.need_to_emergency_stop == True:
             self.need_to_emergency_stop = False
-            # self.sync_client.speak("ty")
+            await self.async_client.speak("ty")
             print(f"ID:{self.id} has resumed moving!")
 
     async def move(self):
