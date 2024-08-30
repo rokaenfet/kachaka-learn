@@ -14,9 +14,9 @@ GREEN = (0,255,0)
 BLUE = (255,0,0)
 BLACK = (0,0,0)
 LINEAR_SPEED = 0.3
-AUTO_LINEAR_SPEED = 0.2
+AUTO_LINEAR_SPEED = 1
 ANGULAR_SPEED = 1
-AUTO_ANGULAR_SPEED = 0.1
+AUTO_ANGULAR_SPEED = 2
 EMERGENCY_STOP_DISTANCE = 0.2
 WIN_W = 1280
 WIN_H = 720
@@ -41,6 +41,10 @@ class KachakaFrame():
         self.linear = 0
         self.angular = 0
         self.being_controlled = False
+        self.human_found_count = 0
+        self.face_found_count = 0
+        self.find_face_mode = False
+        self.target_near = False
 
         self.target_pos = None
         self.cv_img = None
@@ -62,11 +66,11 @@ class KachakaFrame():
         if self.nearest_scan_dist < EMERGENCY_STOP_DISTANCE:
             self.need_to_emergency_stop = True
             print(f"ID:{self.id} has prevented a crash!")
-            await self.async_client.speak("move")
-            self.sync_client.set_robot_velocity(0, 0)
+            await self.async_client.speak("あぶなーい")
+            self.sync_client.set_robot_velocity(-self.linear, -self.angular)
         elif self.need_to_emergency_stop == True:
             self.need_to_emergency_stop = False
-            await self.async_client.speak("ty")
+            await self.async_client.speak("再開します")
             print(f"ID:{self.id} has resumed moving!")
 
     async def move(self):
@@ -87,17 +91,30 @@ class KachakaFrame():
                 self.target_found = False
         else:
             self.target_found = False
-    
-    async def adjust(self):
+
+    async def _prep_auto_control(self):
         tx, ty, tw, th = self.target_pos
         center_tx, center_ty = tx+tw//2, ty+th//2
-        # horizontal adjustment
-        self.angular = np.sign(WIN_W//2-center_tx)*AUTO_ANGULAR_SPEED
-        # distance adjustment
+        x_r = (WIN_W/2-center_tx)/WIN_W
+        area_r = (tw*th)/(WIN_W*WIN_H)
+        d_linear, d_angular = (1-area_r)*AUTO_LINEAR_SPEED, x_r*AUTO_ANGULAR_SPEED
+        return d_linear, d_angular, x_r, area_r, tx, ty, tw, th
+    
+    async def adjust(self):
+        d_linear, d_angular, x_r, area_r, tx, ty, tw, th = await self._prep_auto_control()
+        self.angular = d_angular
         if ty <= THRE:
-            self.linear -= AUTO_LINEAR_SPEED
-        elif th <= WIN_H//3.5:
-            self.linear += AUTO_LINEAR_SPEED
+            self.linear = -area_r*AUTO_LINEAR_SPEED
+        else:
+            self.linear, self.angular = 0,0
+
+    async def follow(self):
+        d_linear, d_angular, x_r, area_r, tx, ty, tw, th = await self._prep_auto_control()
+        self.angular = d_angular
+        if area_r < 0.3:
+            self.linear = d_linear
+        else:
+            self.linear, self.angular = 0, 0
 
     async def control(self):
         if keyboard.is_pressed(str(self.id)):
@@ -113,10 +130,16 @@ class KachakaFrame():
         else:
             self.being_controlled = False
 
-    def annotate(self, st:float):
-        cv2.putText(self.cv_img, f"fps:{round(1/(time.time()-st))}", (20, 80), *lazy_cv2_txt_params)
-        cv2.putText(self.cv_img, f"{round(self.nearest_scan_dist, 3)}", (20, 140), *lazy_cv2_txt_params)
-        cv2.putText(self.cv_img, f"ID:{self.id}", (WIN_W-20,20), *lazy_cv2_txt_params)
+    def annotate(self, st:float, show_fps = False, show_nearest_lidar = False, show_id = True):
+        if show_fps:
+            cv2.putText(self.cv_img, f"fps:{round(1/(time.time()-st))}", (20, 80), *lazy_cv2_txt_params)
+        if show_nearest_lidar:
+            cv2.putText(self.cv_img, f"{round(self.nearest_scan_dist, 3)}", (20, 140), *lazy_cv2_txt_params)
+        if show_id:
+            cv2.putText(self.cv_img, f"ID:{self.id}", (WIN_W-20,20), *lazy_cv2_txt_params)
+
+    async def speak(self, txt:str):
+        await self.async_client.speak(txt)
 
 async def display_kachakas(kachakas):
     highlighted_imgs = [n.cv_img+10 if n.being_controlled else n.cv_img for n in kachakas]

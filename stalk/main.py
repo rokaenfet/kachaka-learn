@@ -9,7 +9,6 @@ KACHAKA_IPS = {
     1:"192.168.118.159:26400",
     # 2:"192.168.118.77:26400"
     }
-EMERGENCY_STOP_DISTANCE = 0.2
 
 async def main():
     # initiate clients
