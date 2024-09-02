@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 import keyboard
 import mediapipe as mp
+import aioconsole
 
 FONT = cv2.FONT_HERSHEY_PLAIN
 WHITE = (255,255,255)
@@ -29,15 +30,15 @@ class KachakaFrame():
         self.id = id
         self.sync_client = kachaka_api.KachakaApiClient(IP)
         self.async_client = kachaka_api.aio.KachakaApiClient(IP)
-        print(f"Kachaka ID:{self.id} has connected with address: {IP}")
+        print(f"Kachaka ID:{self.id} has {C.GREEN}connected{C.RESET} with address: {IP}")
         self.stream_i = self.async_client.front_camera_ros_compressed_image.stream()
         self.stream_d = self.async_client.object_detection.stream()
-        print(f"stream got")
+        print(f"{C.GREEN}got{C.RESET} stream")
         image = self.sync_client.get_front_camera_ros_compressed_image()
         self.undistort_map = get_camera_info(self.sync_client)
-        print(f"camera info got")
+        print(f"{C.GREEN}got{C.RESET} camera info")
         self.error_code = self.sync_client.get_robot_error_code()
-        print(f"error code got")
+        print(f"{C.GREEN}got{C.RESET} error code")
         self.need_to_emergency_stop = False
         self.target_found = False
         self.sync_client.set_manual_control_enabled(True)
@@ -54,6 +55,9 @@ class KachakaFrame():
         self.cv_img = None
 
         self.face_detector = FaceDetect()
+
+        self.locations = self.get_locations(["start","end"])
+        self.nav_i = 0
 
     async def process_kachaka(self):
         st = time.time()
@@ -148,6 +152,15 @@ class KachakaFrame():
 
     def get_locations(self, locations:str):
         return [location for location in self.sync_client.get_locations() if location.name in locations]
+
+    async def navigate(self):
+        if self.target_found == False:
+            result = await self.async_client.move_to_location(self.locations[self.nav_i].id)
+            if result.success:
+                self.nav_i = (self.nav_i+1)%len(self.locations)
+            else:
+                print(self.error_code[result.error_code])
+
 
 class FaceDetect():
     def __init__(self):
@@ -283,3 +296,26 @@ def pad_images_to_same_shape(imgs:list):
         padded_img = np.pad(img, ((pad_h//2, pad_h//2-pad_h%2), (pad_w//2, pad_w//2-pad_w%2), (0, 0)), mode='constant', constant_values=0)
         imgs[i] = padded_img
     return imgs
+
+async def show_map(kachakas):
+    while True:
+        imgs = await get_map_images(kachakas)
+        cv2.imshow("",np.concatenate(imgs, axis=1))
+        cv2.waitKey(1)
+
+async def monitor_key_press(tasks:list[asyncio.Task]):
+    while True:
+        key = await aioconsole.ainput()
+        if key.lower() == 'q':
+            print("Key 'q' pressed. Terminating all tasks...")
+            for task in tasks:
+                task.cancel()
+            break
+
+
+class C:
+    RED = "\033[31m"
+    GREEN = "\033[32m"
+    YELLOW = "\033[33m"
+    BLUE = "\033[34m"
+    RESET = "\033[0m"
