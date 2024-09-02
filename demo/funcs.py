@@ -118,6 +118,9 @@ class KachakaFrame():
         cv2.putText(self.cv_img, f"{round(self.nearest_scan_dist, 3)}", (20, 140), *lazy_cv2_txt_params)
         cv2.putText(self.cv_img, f"ID:{self.id}", (WIN_W-20,20), *lazy_cv2_txt_params)
 
+    def get_locations(self, locations:str):
+        return [location for location in self.sync_client.get_locations() if location.name in locations]
+
 async def display_kachakas(kachakas):
     highlighted_imgs = [n.cv_img+10 if n.being_controlled else n.cv_img for n in kachakas]
     resized_imgs = [cv2.resize(n, (640, 360)) for n in highlighted_imgs]

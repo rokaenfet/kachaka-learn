@@ -6,6 +6,7 @@ import matplotlib.patches as patches
 import cv2
 import numpy as np
 import keyboard
+import mediapipe as mp
 
 FONT = cv2.FONT_HERSHEY_PLAIN
 WHITE = (255,255,255)
@@ -35,9 +36,12 @@ class KachakaFrame():
         image = self.sync_client.get_front_camera_ros_compressed_image()
         self.undistort_map = get_camera_info(self.sync_client)
         print(f"camera info got")
+        self.error_code = self.sync_client.get_robot_error_code()
+        print(f"error code got")
         self.need_to_emergency_stop = False
         self.target_found = False
         self.sync_client.set_manual_control_enabled(True)
+        self.sync_client.set_auto_homing_enabled(False)
         self.linear = 0
         self.angular = 0
         self.being_controlled = False
@@ -49,6 +53,8 @@ class KachakaFrame():
         self.target_pos = None
         self.cv_img = None
 
+        self.face_detector = FaceDetect()
+
     async def process_kachaka(self):
         st = time.time()
         self.linear, self.angular = 0, 0
@@ -59,7 +65,6 @@ class KachakaFrame():
         await self.human_detection() # detect human
         self.annotate(st) # annotate img
 
-    
     async def emergency_stop(self):
         lidar_scan = await self.async_client.get_ros_laser_scan()
         self.nearest_scan_dist = min([dist for dist in lidar_scan.ranges if dist > 0])
@@ -106,7 +111,7 @@ class KachakaFrame():
         if ty <= THRE:
             self.linear = -area_r*AUTO_LINEAR_SPEED
         else:
-            self.linear, self.angular = 0,0
+            self.linear, self.angular = 0, 0
 
     async def follow(self):
         d_linear, d_angular, x_r, area_r, tx, ty, tw, th = await self._prep_auto_control()
@@ -141,6 +146,75 @@ class KachakaFrame():
     async def speak(self, txt:str):
         await self.async_client.speak(txt)
 
+    def get_locations(self, locations:str):
+        return [location for location in self.sync_client.get_locations() if location.name in locations]
+
+class FaceDetect():
+    def __init__(self):
+        self.mp_face_detection = mp.solutions.face_detection
+        self.mp_drawing = mp.solutions.drawing_utils
+        self.face_detector = self.mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.5)
+
+        self.results = None
+        
+    def process(self, img):
+        self.results = self.face_detector.process(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+
+    def is_face_present(self):
+        return self.results.detections
+    
+    def draw_landmarks(self, img):
+        for detection in self.results.detections:
+            self.mp_drawing.draw_detection(img, detection)
+
+class FaceMesh():
+    def __init__(self):
+        self.mp_drawing = mp.solutions.drawing_utils
+        self.mp_drawing_styles = mp.solutions.drawing_styles
+        self.mp_face_mesh = mp.solutions.face_mesh
+        self.drawing_spec = self.mp_drawing.DrawingSpec(thickness=1, circle_radius=1)
+        self.face_mesh_detection = self.mp_face_mesh.FaceMesh(
+            static_image_mode=True,
+            max_num_faces=1,
+            refine_landmarks=True,
+            min_detection_confidence=0.5)
+
+        self.results = None
+        
+    def process(self, img):
+        self.results = self.face_mesh_detection.process(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+
+    def is_face_present(self):
+        if self.results:
+            return self.results.multi_face_landmarks
+    
+    def draw_landmarks(self, img, draw_tesselation=True, draw_contours=True, draw_irises=True):
+        for face_landmarks in self.results.multi_face_landmarks:
+            if draw_tesselation == True:
+                self.mp_drawing.draw_landmarks(
+                    image=img,
+                    landmark_list=face_landmarks,
+                    connections=self.mp_face_mesh.FACEMESH_TESSELATION,
+                    landmark_drawing_spec=None,
+                    connection_drawing_spec=self.mp_drawing_styles
+                    .get_default_face_mesh_tesselation_style())
+            if draw_contours == True:
+                self.mp_drawing.draw_landmarks(
+                    image=img,
+                    landmark_list=face_landmarks,
+                    connections=self.mp_face_mesh.FACEMESH_CONTOURS,
+                    landmark_drawing_spec=None,
+                    connection_drawing_spec=self.mp_drawing_styles
+                    .get_default_face_mesh_contours_style())
+            if draw_irises == True:
+                self.mp_drawing.draw_landmarks(
+                    image=img,
+                    landmark_list=face_landmarks,
+                    connections=self.mp_face_mesh.FACEMESH_IRISES,
+                    landmark_drawing_spec=None,
+                    connection_drawing_spec=self.mp_drawing_styles
+                    .get_default_face_mesh_iris_connections_style())
+                
 async def display_kachakas(kachakas):
     highlighted_imgs = [n.cv_img+10 if n.being_controlled else n.cv_img for n in kachakas]
     resized_imgs = [cv2.resize(n, (640, 360)) for n in highlighted_imgs]
@@ -187,3 +261,25 @@ def draw_box(img, objects):
         img = cv2.rectangle(img, (x,y), (x+w,y+h), color=GREEN, thickness=2)
         img = cv2.putText(img, f"score:{round(obj.score,3)}", (x+20, y), FONT, 1, GREEN, 1)
     return img
+
+async def get_map_images(kachakas:KachakaFrame):
+    imgs = []
+    for k in kachakas:
+        png_map = await k.async_client.get_png_map()
+        png_map = cv2.imdecode(np.frombuffer(png_map.data, dtype=np.uint8), flags=1)
+        imgs.append(png_map)
+    imgs = pad_images_to_same_shape(imgs)
+    return imgs
+
+def pad_images_to_same_shape(imgs:list):
+    max_w, max_h = 0, 0
+    for img in imgs:
+        w, h, _ = img.shape
+        max_w, max_h = max(max_w, w), max(max_h, h)
+    for i,img in enumerate(imgs):
+        w, h, _ = img.shape
+        pad_w = max_w - w if max_w > w else 0
+        pad_h = max_h - h if max_h > h else 0
+        padded_img = np.pad(img, ((pad_h//2, pad_h//2-pad_h%2), (pad_w//2, pad_w//2-pad_w%2), (0, 0)), mode='constant', constant_values=0)
+        imgs[i] = padded_img
+    return imgs
