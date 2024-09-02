@@ -24,6 +24,7 @@ Learning kachaka-api
   - set points to go to, or be able to share coordinates between both robots
 - [ ] camera / video setup which displays more continuosly
 - [ ] optimization via concurrency
+  - [ ] smooth switching between navigate and human_detection
 
 
 # Concurrency

@@ -168,6 +168,7 @@ class KachakaFrame():
             while self.run:
                 if self.target_found == False:
                     result = await self.async_client.move_to_location(self.locations[self.nav_i].id)
+                    print(result)
                     if result.success:
                         self.nav_i = (self.nav_i+1)%len(self.locations)
                     else:

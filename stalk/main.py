@@ -22,8 +22,8 @@ async def detection_process(kachaka: KachakaFrame, navigate_task:asyncio.Task):
     # Stalking stage
     if kachaka.target_found:
         # cancel navigation task
+        # print(kachaka.sync_client.get_last_command_result(),"\n")
         if not navigate_task.cancelled() and kachaka.cd > 10:
-            navigate_task.cancel()
             kachaka.cd = 0
                 
         await kachaka.adjust()
