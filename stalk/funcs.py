@@ -58,6 +58,9 @@ class KachakaFrame():
 
         self.locations = self.get_locations(["start","end"])
         self.nav_i = 0
+        self.run = True
+
+        self.cd = 0
 
     async def process_kachaka(self):
         st = time.time()
@@ -75,22 +78,29 @@ class KachakaFrame():
         if self.nearest_scan_dist < EMERGENCY_STOP_DISTANCE:
             self.need_to_emergency_stop = True
             print(f"ID:{self.id} has prevented a crash!")
-            await self.async_client.speak("あぶなーい")
+            await self.async_client.speak("move")
             self.sync_client.set_robot_velocity(-self.linear, -self.angular)
         elif self.need_to_emergency_stop == True:
             self.need_to_emergency_stop = False
-            await self.async_client.speak("再開します")
+            await self.async_client.speak("re")
             print(f"ID:{self.id} has resumed moving!")
 
     async def move(self):
-        await self.async_client.set_robot_velocity(self.linear, self.angular)
+        if self.run:
+            await self.async_client.set_robot_velocity(self.linear, self.angular)
+
+    async def get_image_from_camera(self):
+        image = await self.stream_i.__anext__()
+        self.cv_img = cv2.imdecode(np.frombuffer(image.data, dtype=np.uint8), flags=1)
+        return self.cv_img
 
     async def human_detection(self):
         image, (header, objects) = await asyncio.gather(anext(self.stream_i), anext(self.stream_d))
         self.cv_img = cv2.imdecode(np.frombuffer(image.data, dtype=np.uint8), flags=1) # roscompressed to img
         objects = [n for n in objects if n.label==1]
-        self.cv_img = draw_box(undistort(self.cv_img, *self.undistort_map), objects) # undistort then draw bounding box
+        self.cv_img = undistort(self.cv_img, *self.undistort_map)
         if len(objects) > 0:
+            self.cv_img = draw_box(self.cv_img, objects)
             self.target_pos = process_object(objects) #x, y, w, h
             if self.target_pos:
                 cv2.putText(self.cv_img, "X", (self.target_pos[0]+self.target_pos[2]//2, 
@@ -139,7 +149,7 @@ class KachakaFrame():
         else:
             self.being_controlled = False
 
-    def annotate(self, st:float, show_fps = False, show_nearest_lidar = False, show_id = True):
+    async def annotate(self, st:float, show_fps = False, show_nearest_lidar = False, show_id = True):
         if show_fps:
             cv2.putText(self.cv_img, f"fps:{round(1/(time.time()-st))}", (20, 80), *lazy_cv2_txt_params)
         if show_nearest_lidar:
@@ -154,12 +164,16 @@ class KachakaFrame():
         return [location for location in self.sync_client.get_locations() if location.name in locations]
 
     async def navigate(self):
-        if self.target_found == False:
-            result = await self.async_client.move_to_location(self.locations[self.nav_i].id)
-            if result.success:
-                self.nav_i = (self.nav_i+1)%len(self.locations)
-            else:
-                print(self.error_code[result.error_code])
+        try:
+            while self.run:
+                if self.target_found == False:
+                    result = await self.async_client.move_to_location(self.locations[self.nav_i].id)
+                    if result.success:
+                        self.nav_i = (self.nav_i+1)%len(self.locations)
+                    else:
+                        print(self.error_code[result.error_code])
+        except asyncio.CancelledError:
+            print(f'Navigation for Kachaka:{self.id} was cancelled.')
 
 
 class FaceDetect():
@@ -170,11 +184,12 @@ class FaceDetect():
 
         self.results = None
         
-    def process(self, img):
+    async def process(self, img):
         self.results = self.face_detector.process(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
 
     def is_face_present(self):
-        return self.results.detections
+        if self.results:
+            return self.results.detections
     
     def draw_landmarks(self, img):
         for detection in self.results.detections:
@@ -228,11 +243,10 @@ class FaceMesh():
                     connection_drawing_spec=self.mp_drawing_styles
                     .get_default_face_mesh_iris_connections_style())
                 
-async def display_kachakas(kachakas):
-    highlighted_imgs = [n.cv_img+10 if n.being_controlled else n.cv_img for n in kachakas]
-    resized_imgs = [cv2.resize(n, (640, 360)) for n in highlighted_imgs]
-    disp_img = np.concatenate((resized_imgs), axis=1)
-    cv2.imshow("", disp_img)
+async def display_kachakas(kachakas:list[KachakaFrame]):
+    imgs = [cv2.resize(n.cv_img, (640, 360)) for n in kachakas]
+    imgs = np.concatenate((imgs), axis=1)
+    cv2.imshow("", imgs)
     cv2.waitKey(1)
 
 def move(client:kachaka_api.KachakaApiClient, linear:float, angular:float):
@@ -303,7 +317,7 @@ async def show_map(kachakas):
         cv2.imshow("",np.concatenate(imgs, axis=1))
         cv2.waitKey(1)
 
-async def monitor_key_press(tasks:list[asyncio.Task]):
+async def task_monitor_key_press(tasks:list[asyncio.Task]):
     while True:
         key = await aioconsole.ainput()
         if key.lower() == 'q':
@@ -312,6 +326,14 @@ async def monitor_key_press(tasks:list[asyncio.Task]):
                 task.cancel()
             break
 
+async def object_monitor_key_press(kachakas:list[KachakaFrame]):
+    while True:
+        key = await aioconsole.ainput()
+        if key.lower() == 'q':
+            print("Key 'q' pressed. Terminating all tasks...")
+            for kachaka in kachakas:
+                kachaka.run = False
+            break
 
 class C:
     RED = "\033[31m"

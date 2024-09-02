@@ -20,7 +20,23 @@ Learning kachaka-api
 - [x] make kachaka move towards a person it sees
 - [x] add face detection pipeline and take a snap of the front side w face in frame
 - [x] asynchronous control of multiple robots
-- [ ] navigation system for multiple robots
+- [x] navigation system for multiple robots
   - set points to go to, or be able to share coordinates between both robots
 - [ ] camera / video setup which displays more continuosly
-- [ ] smoother movement during manual control
+- [ ] optimization via concurrency
+
+
+# Concurrency
+
+![](asset/Python-Concurrency-API-Choice.png)
+
+![](asset/Python-Concurrency-API-Decision-Tree.png)
+
+[resource](https://superfastpython.com/python-concurrency-choose-api/#Problem_of_Pythons_Concurrency_APIs)
+
+1. Choosing a module
+   1. Coroutine-based using `asyncio`
+   2. Thread-based using `threading`
+   3. Process-based using `multiprocessing`
+2. pool-based (e.g. process Pool) or class-based (e.g. Process class)?
+   1. If using pool-based, Pool class or PoolExecutor class?
