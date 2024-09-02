@@ -6,25 +6,28 @@ warnings.filterwarnings("ignore")
 from funcs import *
 
 KACHAKA_IPS = {
-    0:"192.168.118.158:26400",
+    # 0:"192.168.118.158:26400",
     1:"192.168.118.159:26400",
     # 2:"192.168.118.77:26400"
     }
 
-async def detection_process(kachaka: KachakaFrame, navigate_task:asyncio.Task):
+async def detection_process(kachaka: KachakaFrame):
     # Activate camera and start timing
     st = time.time()
     await kachaka.human_detection()  # Detect human asynchronously
 
     # Process the face detection in parallel with other tasks
     face_process_task = asyncio.gather(kachaka.face_detector.process(kachaka.cv_img))
+    navigate_task = asyncio.gather(asyncio.create_task(kachaka.short_navigate()))
+
+    # cancel navigation task
+    if kachaka.cd > 10:
+        kachaka.cd = 0
+        navigate_task.cancel()
 
     # Stalking stage
     if kachaka.target_found:
-        # cancel navigation task
-        # print(kachaka.sync_client.get_last_command_result(),"\n")
-        if not navigate_task.cancelled() and kachaka.cd > 10:
-            kachaka.cd = 0
+        # asyncio.gather(asyncio.create_task(kachaka.short_navigate()))
                 
         await kachaka.adjust()
 
@@ -50,6 +53,7 @@ async def detection_process(kachaka: KachakaFrame, navigate_task:asyncio.Task):
         
     # Ensure face processing and landmark drawing are done
     await face_process_task
+    await navigate_task
 
     if kachaka.face_detector.is_face_present():
         kachaka.face_detector.draw_landmarks(kachaka.cv_img)
@@ -57,30 +61,28 @@ async def detection_process(kachaka: KachakaFrame, navigate_task:asyncio.Task):
     # Annotation task
     await kachaka.annotate(st, show_fps=True, show_nearest_lidar=False, show_id=True)
 
-async def controller(kachakas:list[KachakaFrame], navigate_tasks:list[asyncio.Task]):
+async def controller(kachakas:list[KachakaFrame]):
     """
     asynchronously runs navigation on each kachaka and detection_tasks then displays
     navigation() only runs if kachaka object has not found a target
     """
-
+    # navigate_tasks = [asyncio.create_task(kachaka.navigate()) for kachaka in kachakas]
     print(f"{C.GREEN}Loaded{C.RESET} controller()")
     while any([kachaka.run for kachaka in kachakas]):
         await asyncio.gather(
-            *[asyncio.create_task(detection_process(kachaka, navigate_tasks[i])) for i,kachaka in enumerate(kachakas)]
+            *[asyncio.create_task(detection_process(kachaka)) for i,kachaka in enumerate(kachakas)]
         )
         await display_kachakas(kachakas)
 
 async def main():
     # initiate clients
     kachakas = [KachakaFrame(v, k) for k,v in KACHAKA_IPS.items()]
-    navigate_tasks = [asyncio.create_task(kachaka.navigate()) for kachaka in kachakas]
     move_tasks = [asyncio.create_task(kachaka.move()) for kachaka in kachakas]
     monitor_task = asyncio.create_task(object_monitor_key_press(kachakas))
-    controller_task = asyncio.create_task(controller(kachakas, navigate_tasks))
+    controller_task = asyncio.create_task(controller(kachakas))
     print(f"{C.BLUE}Starting{C.RESET} Script")
     await asyncio.gather(
         controller_task,
-        *navigate_tasks,
         *move_tasks,
         monitor_task
         )

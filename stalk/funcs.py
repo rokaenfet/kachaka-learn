@@ -176,6 +176,14 @@ class KachakaFrame():
         except asyncio.CancelledError:
             print(f'Navigation for Kachaka:{self.id} was cancelled.')
 
+    async def short_navigate(self):
+        if self.run and self.target_found:
+            result = await self.async_client.move_to_location(self.locations[self.nav_i].id)
+            if result.success:
+                self.nav_i = (self.nav_i+1)%len(self.locations)
+            else:
+                print(self.error_code[result.error_code])
+
 
 class FaceDetect():
     def __init__(self):
