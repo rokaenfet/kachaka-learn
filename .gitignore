@@ -1,4 +1,9 @@
 test.png
+test.py
+log/
+MEBOW/
+output/
+cocoapi/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -16,7 +21,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
