@@ -11,9 +11,9 @@ KACHAKA_IPS = {
     # 2:"192.168.118.77:26400"
     }
 
-SEARCH_PERIOD = 40
-SEARCH_COOLDOWN = 20
-DURATION_FOR_CANCEL_NAV = 3
+SEARCH_PERIOD = 20 # iteration threshold for if face is found
+SEARCH_COOLDOWN = 20 # cooldown between locking onto 2 instances of detected human
+DURATION_FOR_CANCEL_NAV = 3 # duration until navigation is turned off when human is detected
 
 async def detection_process(kachaka: KachakaFrame):
     st = time.time()

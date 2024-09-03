@@ -23,7 +23,7 @@ EMERGENCY_STOP_DISTANCE = 0.2
 WIN_W = 1280
 WIN_H = 720
 THRE = 30
-lazy_cv2_txt_params = (FONT, 3, WHITE, 2)
+lazy_cv2_txt_params = (FONT, 3, GREEN, 3)
 
 class KachakaFrame():
     def __init__(self, IP:str, id:int):
@@ -72,7 +72,7 @@ class KachakaFrame():
         await self.move() # move with the updated speed
         await self.emergency_stop() # detect for emergency stops
         await self.human_detection() # detect human
-        self.annotate(st) # annotate img
+        await self.annotate(st, True, False, True) # annotate img
 
     async def emergency_stop(self):
         lidar_scan = await self.async_client.get_ros_laser_scan()
@@ -154,11 +154,11 @@ class KachakaFrame():
 
     async def annotate(self, st:float, show_fps = False, show_nearest_lidar = False, show_id = True):
         if show_fps:
-            cv2.putText(self.cv_img, f"fps:{round(1/(time.time()-st))}", (20, 80), *lazy_cv2_txt_params)
+            self.cv_img = cv2.putText(self.cv_img, f"fps:{round(1/(time.time()-st))}", (20, 80), *lazy_cv2_txt_params)
         if show_nearest_lidar:
-            cv2.putText(self.cv_img, f"{round(self.nearest_scan_dist, 3)}", (20, 140), *lazy_cv2_txt_params)
+            self.cv_img = cv2.putText(self.cv_img, f"{round(self.nearest_scan_dist, 3)}", (20, 140), *lazy_cv2_txt_params)
         if show_id:
-            cv2.putText(self.cv_img, f"ID:{self.id}", (WIN_W-20,20), *lazy_cv2_txt_params)
+            self.cv_img = cv2.putText(self.cv_img, f"ID:{self.id}", (WIN_W-100,40), *lazy_cv2_txt_params)
 
     async def speak(self, txt:str):
         await self.async_client.speak(txt)
@@ -369,6 +369,13 @@ async def object_monitor_key_press(kachakas:list[KachakaFrame]):
             print("Key 'q' pressed. Terminating all tasks...")
             for kachaka in kachakas:
                 kachaka.run = False
+            break
+        elif key.lower() == 'h':
+            print("Key 'h' pressed. Returning to home...")
+            for kachaka in kachakas:
+                kachaka.run = False
+                kachaka.sync_client.set_auto_homing_enabled(False)
+                kachaka.sync_client.return_home()
             break
 
 class C:

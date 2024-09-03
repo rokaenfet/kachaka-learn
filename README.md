@@ -25,7 +25,7 @@ Learning kachaka-api
 - [x] camera / video setup which displays more continuosly
 - [x] smooth switching between navigate and human_detection
 - [ ] make kachaka move to the front side of the person
-  - [ ] equally voice output to get the attention of the user
+  - [ ] voice output to get the attention of the user
 
 
 # Concurrency
@@ -42,3 +42,5 @@ Learning kachaka-api
    3. Process-based using `multiprocessing`
 2. pool-based (e.g. process Pool) or class-based (e.g. Process class)?
    1. If using pool-based, Pool class or PoolExecutor class?
+
+# Human-body orientation estimation
