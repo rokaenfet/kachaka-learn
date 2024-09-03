@@ -22,9 +22,10 @@ Learning kachaka-api
 - [x] asynchronous control of multiple robots
 - [x] navigation system for multiple robots
   - set points to go to, or be able to share coordinates between both robots
-- [ ] camera / video setup which displays more continuosly
-- [ ] optimization via concurrency
-  - [ ] smooth switching between navigate and human_detection
+- [x] camera / video setup which displays more continuosly
+- [x] smooth switching between navigate and human_detection
+- [ ] make kachaka move to the front side of the person
+  - [ ] equally voice output to get the attention of the user
 
 
 # Concurrency
