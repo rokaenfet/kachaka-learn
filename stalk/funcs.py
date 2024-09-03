@@ -18,7 +18,7 @@ BLACK = (0,0,0)
 LINEAR_SPEED = 0.3
 AUTO_LINEAR_SPEED = 1
 ANGULAR_SPEED = 1
-AUTO_ANGULAR_SPEED = 2
+AUTO_ANGULAR_SPEED = .8
 EMERGENCY_STOP_DISTANCE = 0.2
 WIN_W = 1280
 WIN_H = 720
@@ -59,6 +59,8 @@ class KachakaFrame():
         self.locations = self.get_locations(["start","end"])
         self.nav_i = 0
         self.run = True
+        self.run_nav = True
+        self.navigating = False
 
         self.cd = 0
 
@@ -86,8 +88,7 @@ class KachakaFrame():
             print(f"ID:{self.id} has resumed moving!")
 
     async def move(self):
-        if self.run:
-            await self.async_client.set_robot_velocity(self.linear, self.angular)
+        await self.async_client.set_robot_velocity(self.linear, self.angular)
 
     async def get_image_from_camera(self):
         image = await self.stream_i.__anext__()
@@ -124,6 +125,8 @@ class KachakaFrame():
         self.angular = d_angular
         if ty <= THRE:
             self.linear = -area_r*AUTO_LINEAR_SPEED
+        elif tw/WIN_W < 0.2 or ty/WIN_H < 0.2 or area_r < 0.4:
+            self.linear = area_r*AUTO_LINEAR_SPEED
         else:
             self.linear, self.angular = 0, 0
 
@@ -160,7 +163,7 @@ class KachakaFrame():
     async def speak(self, txt:str):
         await self.async_client.speak(txt)
 
-    def get_locations(self, locations:str):
+    def get_locations(self, locations:str) -> list[str]:
         return [location for location in self.sync_client.get_locations() if location.name in locations]
 
     async def navigate(self):
@@ -168,7 +171,6 @@ class KachakaFrame():
             while self.run:
                 if self.target_found == False:
                     result = await self.async_client.move_to_location(self.locations[self.nav_i].id)
-                    print(result)
                     if result.success:
                         self.nav_i = (self.nav_i+1)%len(self.locations)
                     else:
@@ -177,19 +179,44 @@ class KachakaFrame():
             print(f'Navigation for Kachaka:{self.id} was cancelled.')
 
     async def short_navigate(self):
-        if self.run and self.target_found:
-            result = await self.async_client.move_to_location(self.locations[self.nav_i].id)
-            if result.success:
-                self.nav_i = (self.nav_i+1)%len(self.locations)
-            else:
-                print(self.error_code[result.error_code])
+        try:
+            if self.run:
+                result = await self.async_client.move_to_location(self.locations[self.nav_i].id)
+                if result.success:
+                    self.nav_i = (self.nav_i+1)%len(self.locations)
+                else:
+                    print(self.error_code[result.error_code])
+        except Exception as e:
+            print(self.id,":",e)
 
+    async def check_navigate(self):
+        """
+        returns True if its currently navigating
+        """
+        is_command_running, get_running_command, get_last_command_result = await self.check_command_states()
+        return is_command_running and get_running_command is not None and get_running_command.move_to_location_command is not None
+
+    async def check_command_states(self) -> tuple:
+        """
+        Return -> bool, [pb2.GetCommandStateResponse, None], (Result, Command)
+        """
+        is_command_running = await self.async_client.is_command_running()
+        get_running_command = await self.async_client.get_running_command()
+        get_last_command_result = await self.async_client.get_last_command_result()
+        return is_command_running, get_running_command, get_last_command_result
+    
+    async def cancel_navigation(self):
+        """
+        cancels move_to_location() if currently running
+        """
+        if await self.check_navigate():
+            await self.async_client.cancel_command()
 
 class FaceDetect():
     def __init__(self):
         self.mp_face_detection = mp.solutions.face_detection
         self.mp_drawing = mp.solutions.drawing_utils
-        self.face_detector = self.mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.5)
+        self.face_detector = self.mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.7)
 
         self.results = None
         
