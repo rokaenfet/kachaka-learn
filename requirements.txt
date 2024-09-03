@@ -18,7 +18,7 @@ jax==0.4.31
 jaxlib==0.4.31
 jedi==0.19.1
 Jinja2==3.1.4
-kachaka-api @ git+https://github.com/pf-robotics/kachaka-api@7bb0069f1e12665371cae8e68cb04f3c3fcf1d1d
+# kachaka-api @ git+https://github.com/pf-robotics/kachaka-api@7bb0069f1e12665371cae8e68cb04f3c3fcf1d1d
 keyboard==0.13.5
 kiwisolver==1.4.5
 markdown-it-py==3.0.0

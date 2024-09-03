@@ -4,7 +4,7 @@ Learning kachaka-api
 
 # Execute
 1. `venv/Source/activate`
-2. `pip install -r requirements.txt`
+2. `pip install -r requirements.txt; pip install -r ./MEBOW/requirements.txt`
 
 # Debug / Profile
 `scalene --cpu --memory --cli .\stalk\main.py`
@@ -44,3 +44,6 @@ Learning kachaka-api
    1. If using pool-based, Pool class or PoolExecutor class?
 
 # Human-body orientation estimation
+
+- **Monocular Estimation of Body Orientation in the Wild**
+  - [repo](https://github.com/ChenyanWu/MEBOW)
