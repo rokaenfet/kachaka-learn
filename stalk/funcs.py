@@ -68,7 +68,7 @@ class KachakaFrame():
         # HBOE / HOE model
         self.mebow_model = MEBOWFrame()
 
-    async def process_kachaka(self):
+    async def process_kachaka(self): #DEPRECATED
         st = time.time()
         self.linear, self.angular = 0, 0
         await self.move() # set speed to 0,0
@@ -215,6 +215,19 @@ class KachakaFrame():
         """
         if await self.check_navigate():
             await self.async_client.cancel_command()
+
+    async def mebow_annotate(self, line_length=100):
+        # only if there is a result
+        if self.target_found:
+            d_linear, d_angular, x_r, area_r, tx, ty, tw, th = await self._prep_auto_control()
+            deg = self.mebow_model.ori + 90
+            rads = np.deg2rad(deg)
+            center_x, center_y = tx+tw//2, ty+th
+            end_x = int(center_x + line_length * np.cos(rads))
+            end_y = int(center_y - line_length * np.sin(rads))
+            cv2.line(self.cv_img, (center_x, center_y), (end_x, end_y), BLUE, 3)
+            cv2.putText(self.cv_img, str(deg), (20,60), *lazy_cv2_txt_params)
+        
 
 class FaceDetect():
     def __init__(self):
@@ -381,6 +394,14 @@ async def object_monitor_key_press(kachakas:list[KachakaFrame]):
                 kachaka.sync_client.set_auto_homing_enabled(False)
                 kachaka.sync_client.return_home()
             break
+
+async def anext(iterator, default=None):
+    try:
+        return await iterator.__anext__()
+    except StopAsyncIteration:
+        if default is None:
+            raise
+        return default
 
 class C:
     RED = "\033[31m"

@@ -101,18 +101,12 @@ class MEBOWFrame():
                 transforms.ToTensor(),
                 normalize])
         
-    def process(self, img):
+    async def process(self, img):
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img = cv2.resize(img, (192, 256))
         input = self.transform(img).unsqueeze(0)
         input = input.float()
 
         self.model.eval()
-        _, hoe_output = self.model(input)
-        ori = torch.argmax(hoe_output[0]) * 5
-        print("The predicted orientation angle is: {}".format(ori))
-
-        import matplotlib.pyplot as plt
-        for i in range(hoe_output.shape[1]):
-            plt.scatter(i * 5, hoe_output[0, i].detach().numpy())
-        plt.savefig("plot.png")
+        _, self.hoe_output = self.model(input)
+        self.ori = torch.argmax(self.hoe_output[0]) * 5

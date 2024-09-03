@@ -6,7 +6,7 @@ warnings.filterwarnings("ignore")
 from funcs import *
 
 KACHAKA_IPS = {
-    0:"192.168.118.158:26400",
+    # 0:"192.168.118.158:26400",
     1:"192.168.118.159:26400",
     # 2:"192.168.118.77:26400"
     }
@@ -17,8 +17,9 @@ DURATION_FOR_CANCEL_NAV = 3 # duration until navigation is turned off when human
 
 async def detection_process(kachaka: KachakaFrame):
     st = time.time()
-    await asyncio.gather(kachaka.human_detection())  # Detect human
-    await asyncio.gather(kachaka.face_detector.process(kachaka.cv_img))
+    await asyncio.gather(kachaka.human_detection())  # object detection
+    await asyncio.gather(kachaka.face_detector.process(kachaka.cv_img)) # face detection
+    await asyncio.gather(kachaka.mebow_model.process(kachaka.cv_img)) # HBOE / HOE
 
     # Stalking stage
     if kachaka.target_found:
@@ -54,7 +55,10 @@ async def detection_process(kachaka: KachakaFrame):
         kachaka.cd = 0
 
     # Annotation task
-    await kachaka.annotate(st, show_fps=True, show_nearest_lidar=False, show_id=True)
+    await asyncio.gather(
+        kachaka.annotate(st, show_fps=True, show_nearest_lidar=False, show_id=True), # fps, lidar_dist, id
+        kachaka.annotate() # mebow annotation
+        )
 
 async def controller(kachakas:list[KachakaFrame]):
     """
@@ -80,7 +84,6 @@ async def navigator(kachaka:KachakaFrame):
 async def main():
     # initiate clients
     kachakas = [KachakaFrame(v, k) for k,v in KACHAKA_IPS.items()]
-    move_tasks = [asyncio.create_task(kachaka.move()) for kachaka in kachakas]
     navigate_tasks = [asyncio.create_task(navigator(kachaka)) for kachaka in kachakas]
     monitor_task = asyncio.create_task(object_monitor_key_press(kachakas))
     controller_task = asyncio.create_task(controller(kachakas))
@@ -88,7 +91,6 @@ async def main():
     print(f"{C.BLUE}Starting{C.RESET} Script")
     await asyncio.gather(
         controller_task,
-        *move_tasks,
         *navigate_tasks,
         monitor_task
         )

@@ -47,3 +47,8 @@ Learning kachaka-api
 
 - **Monocular Estimation of Body Orientation in the Wild**
   - [repo](https://github.com/ChenyanWu/MEBOW)
+  - Works well camera captures whole body, except when facing away (angle prediction oscillates aggressively), otherwise unusable
+- **Partial-Human Orientation Estimation**
+  - [repo](https://github.com/zhaojieting/Part_HOE)
+  - [paper](https://arxiv.org/pdf/2404.14139)
+  - No pre-trained model
