@@ -1,13 +1,14 @@
 import kachaka_api
 import time
 import asyncio
-from kachaka_api.util.vision import OBJECT_LABEL, get_bbox_drawn_image
 import matplotlib.patches as patches
 import cv2
 import numpy as np
 import keyboard
 import mediapipe as mp
 import aioconsole
+
+from mebow_model import MEBOWFrame
 
 FONT = cv2.FONT_HERSHEY_PLAIN
 WHITE = (255,255,255)
@@ -63,6 +64,9 @@ class KachakaFrame():
         self.navigating = False
 
         self.cd = 0
+
+        # HBOE / HOE model
+        self.mebow_model = MEBOWFrame()
 
     async def process_kachaka(self):
         st = time.time()
