@@ -6,7 +6,12 @@ import asyncio
 import math
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
+<<<<<<< HEAD
 import keyboard
+=======
+from IPython.display import Image, clear_output, display
+from pynput import keyboard
+>>>>>>> 2361a5fd514d73b9f008d528269057430d4ffbf9
 import sys
 
 KACHAKA_IP = "192.168.118.159:26400"
@@ -63,31 +68,46 @@ async def get_and_show_laser_scan_loop(client: kachaka_api.aio.KachakaApiClient)
 async def main():
     async_client = kachaka_api.aio.KachakaApiClient(KACHAKA_IP)
     sync_client = kachaka_api.KachakaApiClient(KACHAKA_IP)
-
     lidar_task = asyncio.create_task(get_and_show_laser_scan_loop(async_client))
     camera_task = asyncio.create_task(camera(async_client))
 
-    while True:
-        for k,v in keys.items():
-            if keyboard.is_pressed(k):
-                pressed[k] = True
-            else:
-                pressed[k] = False
+    listener = keyboard.Listener(
+        on_press=on_press,
+        on_release=on_release
+    ).start()
+    try:
+        while True:
+            for k,v in pressed.items():
+                if v == True:
+                    print(k,v,keys[k])
+                    await async_client.set_robot_velocity(*keys[k])
+                    # move(sync_client, *keys[k])
+            
+            status_msg = ''.join([k for k,v in pressed.items() if v==True])
+            sys.stdout.write("\r"+status_msg)
+            sys.stdout.flush()
 
-        for k,v in pressed.items():
-            if v == True:
-                move(sync_client, *keys[k])
+            await asyncio.sleep(0.01)
+    except KeyboardInterrupt:
+        pass
 
-        if keyboard.is_pressed("q"):
-            break
-        
-        status_msg = ''.join([k for k,v in pressed.items() if v==True]).zfill(2)
-        sys.stdout.write("\r"+status_msg)
-        sys.stdout.flush()
+    # lidar_task.cancel()
+    # camera_task.cancel()
 
-        await asyncio.sleep(0.01)
+def on_press(key):
+    try:
+        key = key.char
+    except AttributeError:
+        return
+    if key in keys:
+        pressed[key] = True
 
-    lidar_task.cancel()
-    camera_task.cancel()
+def on_release(key):
+    try:
+        key = key.char
+    except AttributeError:
+        return
+    if key in keys:
+        pressed[key] = False
 
 asyncio.run(main())
