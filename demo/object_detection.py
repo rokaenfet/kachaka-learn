@@ -3,8 +3,6 @@ import kachaka_api
 from kachaka_api.util.vision import OBJECT_LABEL, get_bbox_drawn_image
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
-from IPython.display import Image, clear_output
-import cv2
 import asyncio
 import numpy as np
 import time
