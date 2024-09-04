@@ -4,7 +4,7 @@ Learning kachaka-api
 think-pad pass:1234
 
 # Execute
-1. `venv/Source/activate`
+1. activate venv
 2. `pip install -r requirements.txt; pip install -r ./MEBOW/requirements.txt`
 
 # Folder
