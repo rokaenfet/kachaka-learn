@@ -4,11 +4,21 @@ from kachaka_api.util.vision import OBJECT_LABEL, get_bbox_drawn_image
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 from IPython.display import Image, clear_output
-import cv2
 import asyncio
 import numpy as np
 import time
-KACHAKA_IP = "192.168.118.158:26400"
+
+import os
+from pathlib import Path
+import PyQt5
+
+os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = os.fspath(
+    Path(PyQt5.__file__).resolve().parent / "Qt5" / "plugins"
+)
+
+import cv2
+
+KACHAKA_IP = "192.168.118.159:26400"
 FONT = cv2.FONT_HERSHEY_PLAIN
 WHITE = (255,255,255)
 

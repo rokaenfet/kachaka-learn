@@ -13,12 +13,11 @@ executing==2.0.1
 flatbuffers==24.3.25
 fonttools==4.53.1
 grpcio==1.66.0
-ipython==8.26.0
 jax==0.4.31
 jaxlib==0.4.31
 jedi==0.19.1
 Jinja2==3.1.4
-# kachaka-api @ git+https://github.com/pf-robotics/kachaka-api@7bb0069f1e12665371cae8e68cb04f3c3fcf1d1d
+kachaka-api @ git+https://github.com/pf-robotics/kachaka-api@7bb0069f1e12665371cae8e68cb04f3c3fcf1d1d
 keyboard==0.13.5
 kiwisolver==1.4.5
 markdown-it-py==3.0.0
@@ -57,7 +56,6 @@ stack-data==0.6.3
 traitlets==5.14.3
 typing_extensions==4.12.2
 wcwidth==0.2.13
-torch==1.8.1+cu101
-torchvision==0.9.1+cu101
-torchaudio==0.8.1
--f https://download.pytorch.org/whl/torch_stable.html
+torch
+torchvision
+torchaudio

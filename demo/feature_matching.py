@@ -90,7 +90,7 @@ async def feature_matching(client: kachaka_api.aio.KachakaApiClient):
         cv2.waitKey(1)
 
 async def main():
-    client = kachaka_api.aio.KachakaApiClient(f"{KACHAKA_HOST}:{KACHAKA_PORT}")
+    client = kachaka_api.aio.KachakaApiClient(f"{KACHAKA_IP}")
     await client.set_auto_homing_enabled(False)
     await feature_matching(client)
 
