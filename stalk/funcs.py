@@ -1,12 +1,15 @@
 import kachaka_api
 import time
 import asyncio
-import matplotlib.patches as patches
 import cv2
 import numpy as np
 import keyboard
 import mediapipe as mp
 import aioconsole
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
+from mediapipe import solutions
+from mediapipe.framework.formats import landmark_pb2
 
 from mebow_model import MEBOWFrame
 
@@ -65,8 +68,9 @@ class KachakaFrame():
 
         self.cd = 0
 
-        # HBOE / HOE model
+        # models
         self.mebow_model = MEBOWFrame()
+        self.mp_landmark_model = MPLandmark()
 
     async def process_kachaka(self): #DEPRECATED
         st = time.time()
@@ -216,18 +220,28 @@ class KachakaFrame():
         if await self.check_navigate():
             await self.async_client.cancel_command()
 
-    async def mebow_annotate(self, line_length=100):
-        # only if there is a result
+    async def _draw_orientation_line(self, deg, line_length=100):
         if self.target_found:
             d_linear, d_angular, x_r, area_r, tx, ty, tw, th = await self._prep_auto_control()
-            deg = self.mebow_model.ori + 90
             rads = np.deg2rad(deg)
             center_x, center_y = tx+tw//2, ty+th
             end_x = int(center_x + line_length * np.cos(rads))
             end_y = int(center_y - line_length * np.sin(rads))
             cv2.line(self.cv_img, (center_x, center_y), (end_x, end_y), BLUE, 3)
-            cv2.putText(self.cv_img, str(deg), (20,60), *lazy_cv2_txt_params)
-        
+            cv2.putText(self.cv_img, "deg="+str(round(deg,1)), (20,50), *lazy_cv2_txt_params)
+
+    async def mebow_annotate(self, line_length=100):
+        # only if there is a result
+        deg = self.mebow_model.ori + 90
+        await self._draw_orientation_line(deg)
+
+    async def mp_landmark_annotate(self, line_length=100):
+        m = self.mp_landmark_model
+        if m.result.pose_landmarks:
+            rads, _, _ = m._get_deg_from_landmarks()
+            sign = -1 if m.facing_camera() else 1
+            deg = sign*rads*180/np.pi
+            await self._draw_orientation_line(deg)
 
 class FaceDetect():
     def __init__(self):
@@ -295,7 +309,114 @@ class FaceMesh():
                     landmark_drawing_spec=None,
                     connection_drawing_spec=self.mp_drawing_styles
                     .get_default_face_mesh_iris_connections_style())
-                
+
+class MPLandmark():
+    NOSE=0
+    LEFT_EYE_INNER=1
+    LEFT_EYE=2
+    LEFT_EYE_OUTER=3
+    RIGHT_EYE_INNER=4
+    RIGHT_EYE=5
+    RIGHT_EYE_OUTER=6
+    LEFT_EAR=7
+    RIGHT_EAR=8
+    MOUTH_LEFT=9
+    MOUTH_RIGHT=10
+    LEFT_SHOULDER=11
+    RIGHT_SHOULDER=12
+    LEFT_ELBOW=13
+    RIGHT_ELBOW=14
+    LEFT_WRIST=15
+    RIGHT_WRIST=16
+    LEFT_PINKY=17
+    RIGHT_PINKY=18
+    LEFT_INDEX=19
+    RIGHT_INDEX=20
+    LEFT_THUMB=21
+    RIGHT_THUMB=22
+    LEFT_HIP=23
+    RIGHT_HIP=24
+    LEFT_KNEE=25
+    RIGHT_KNEE=26
+    LEFT_ANKLE=27
+    RIGHT_ANKLE=28
+    LEFT_HEEL=29
+    RIGHT_HEEL=30
+    LEFT_FOOT_INDEX=31
+    RIGHT_FOOT_INDEX=32
+    def __init__(self):
+        self.mp_pose = mp.solutions.pose
+        self.model = self.mp_pose.Pose(
+            static_image_mode = True,
+            min_detection_confidence = 0.5
+        )
+        self.mp_drawer = mp.solutions.drawing_utils
+        self.landmarks = None
+        # options = vision.PoseLandmarkerOptions(
+        #     base_options=python.BaseOptions(model_asset_path='pose_landmarker_heavy.task'),
+        #     output_segmentation_masks=True)
+        # self.detector = vision.PoseLandmarker.create_from_options(options)
+
+    async def process(self, image):
+        self.result = self.model.process(image)
+        if self.result.pose_landmarks:
+            self.landmarks = self.result.pose_landmarks.landmark
+        else:
+            self.landmarks = None
+
+    async def draw_landmarks_on_image(self, rgb_image):
+        if self.result.pose_landmarks:
+            self.mp_drawer.draw_landmarks(
+                rgb_image, self.result.pose_landmarks, self.mp_pose.POSE_CONNECTIONS
+            )
+    
+    def _get_deg_from_landmarks(self):
+        l_shoulder = self._convert_to_ndarray(MPLandmark.LEFT_SHOULDER)
+        r_shoulder = self._convert_to_ndarray(MPLandmark.RIGHT_SHOULDER)
+        axis_z = self._normalize((l_shoulder - r_shoulder))
+        if self._vec_length(axis_z) == 0:
+            axis_z = np.array((0, -1, 0))
+            
+        axis_x = np.cross(np.array((0, 0, 1)), axis_z)
+        if self._vec_length(axis_x) == 0:
+            axis_x = np.array((1, 0, 0))
+        
+        axis_y = np.cross(axis_z, axis_x)
+        rot_matrix = np.array([axis_x, axis_y, axis_z]).transpose()
+        r11, r12, r13 = rot_matrix[0]
+        r21, r22, r23 = rot_matrix[1]
+        r31, r32, r33 = rot_matrix[2]
+
+        theta_x = np.arctan2(r32,r33)
+        theta_y = np.arctan2(-r31,np.sqrt(r32**2+r33**2))
+        theta_z = np.arctan2(r21,r11)
+
+        return theta_x, theta_y, theta_z
+    
+    def _convert_to_ndarray(self, landmark_i):
+        return np.array([self.landmarks[landmark_i].x, self.landmarks[landmark_i].y, self.landmarks[landmark_i].z])
+    
+    def _normalize(self, v):
+        norm = np.linalg.norm(v)
+        if norm == 0: 
+            return v
+        return v / norm
+    
+    def _vec_length(self, v: np.array):
+        return np.sqrt(sum(i**2 for i in v))
+    
+    def facing_camera(self):
+        """
+        returns True if the person is facing the camera
+        """
+        # check if person if facing towards or away from camera
+        l_shoulder = self._convert_to_ndarray(MPLandmark.LEFT_SHOULDER)
+        r_shoulder = self._convert_to_ndarray(MPLandmark.RIGHT_SHOULDER)
+        nose = self._convert_to_ndarray(MPLandmark.NOSE)
+        shoulder_mid = (l_shoulder+r_shoulder)/2
+        d = nose-shoulder_mid
+        return np.sign(d[2]) == -1
+
 async def display_kachakas(kachakas:list[KachakaFrame]):
     imgs = [cv2.resize(n.cv_img, (640, 360)) for n in kachakas]
     imgs = np.concatenate((imgs), axis=1)
