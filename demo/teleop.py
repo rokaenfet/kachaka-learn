@@ -6,12 +6,8 @@ import asyncio
 import math
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
-<<<<<<< HEAD
-import keyboard
-=======
 from IPython.display import Image, clear_output, display
 from pynput import keyboard
->>>>>>> 2361a5fd514d73b9f008d528269057430d4ffbf9
 import sys
 
 KACHAKA_IP = "192.168.118.159:26400"
