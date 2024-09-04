@@ -3,7 +3,6 @@ import kachaka_api
 from kachaka_api.util.vision import OBJECT_LABEL, get_bbox_drawn_image
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
-from IPython.display import Image, clear_output
 import cv2
 import asyncio
 import numpy as np
@@ -12,6 +11,14 @@ KACHAKA_IP = "192.168.118.158:26400"
 FONT = cv2.FONT_HERSHEY_PLAIN
 WHITE = (255,255,255)
 
+async def anext(iterator, default=None):
+    try:
+        return await iterator.__anext__()
+    except StopAsyncIteration:
+        if default is None:
+            raise
+        return default
+
 async def object_detection(client:kachaka_api.aio.KachakaApiClient):
     stream_i = client.front_camera_ros_compressed_image.stream()
     stream_d = client.object_detection.stream()
@@ -19,7 +26,6 @@ async def object_detection(client:kachaka_api.aio.KachakaApiClient):
         st = time.time()
         image, (header, objects) = await asyncio.gather(anext(stream_i), anext(stream_d))
         pil_img = get_bbox_drawn_image(image, objects)
-        clear_output(wait=True)
         cv_img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
         cv2.putText(cv_img, f"fps:{round(1/(time.time()-st))}", (20,80), FONT, 3, WHITE, 2)
         # for object in objects:

@@ -6,11 +6,10 @@ import asyncio
 import math
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
-from IPython.display import Image, clear_output, display
 import keyboard
 import sys
 
-KACHAKA_IP = "192.168.118.158:26400"
+KACHAKA_IP = "192.168.118.159:26400"
 
 speed = .3
 turn = .5
@@ -40,11 +39,9 @@ async def camera(client: kachaka_api.aio.KachakaApiClient):
         cv2.putText(cv_image, f"fps:{round(1/(time.time()-st))}", (20,80), cv2.FONT_HERSHEY_PLAIN, 3, (255,255,255), 2)
         cv2.imshow("", cv2.resize(cv_image, (800,600)))
         cv2.waitKey(1)
-        clear_output(wait=True)
 
 async def get_and_show_laser_scan_loop(client: kachaka_api.aio.KachakaApiClient):
     async for scan in client.ros_laser_scan.stream():
-        clear_output(wait=True)
         fig = plt.figure(figsize=(5, 5))
 
         n = len(scan.ranges)
