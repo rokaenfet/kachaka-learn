@@ -19,7 +19,7 @@ async def detection_process(kachaka: KachakaFrame):
     st = time.time()
     await asyncio.gather(kachaka.human_detection())  # object detection
     await asyncio.gather(kachaka.face_detector.process(kachaka.cv_img)) # face detection
-    await asyncio.gather(kachaka.mebow_model.process(kachaka.cv_img)) # HBOE / HOE
+    await asyncio.gather(kachaka.mp_landmark_model.process(kachaka.cv_img)) # HBOE / HOE
 
     # Stalking stage
     if kachaka.target_found:
@@ -57,7 +57,7 @@ async def detection_process(kachaka: KachakaFrame):
     # Annotation task
     await asyncio.gather(
         kachaka.annotate(st, show_fps=True, show_nearest_lidar=False, show_id=True), # fps, lidar_dist, id
-        kachaka.annotate() # mebow annotation
+        kachaka.mp_landmark_annotate() # mebow annotation
         )
 
 async def controller(kachakas:list[KachakaFrame]):
