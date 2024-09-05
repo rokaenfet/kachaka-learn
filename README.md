@@ -46,10 +46,10 @@ think-pad pass:1234
 - [ ] move kachaka and external devices with mounted laptop
   - [x] kachaka
   - [ ] robot arm
-    - [ ] DAMIAO motor
+    - [x] DAMIAO motor
   - [ ] camera
     - [ ] RealSense
-    - [ ] e
+    - [ ] eMeet c960 webcams
 - [ ] Test model speeds
   - [ ] human detection
   - [ ] face detection

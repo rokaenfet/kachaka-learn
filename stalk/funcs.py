@@ -12,6 +12,7 @@ from mediapipe import solutions
 from mediapipe.framework.formats import landmark_pb2
 
 from mebow_model import MEBOWFrame
+from ultralytics import YOLO
 
 FONT = cv2.FONT_HERSHEY_PLAIN
 WHITE = (255,255,255)
@@ -77,6 +78,8 @@ class KachakaFrame():
 
         self.cd = 0
 
+        self.yolo_model = YOLO("yolov8n.pt")
+
         # models
         print(f"{C.GREEN}got{C.RESET} MEBOW model")
         self.mebow_model = MEBOWFrame()
@@ -130,26 +133,31 @@ class KachakaFrame():
         """        
         image = await self.stream_i.__anext__()
         self.cv_img = cv2.imdecode(np.frombuffer(image.data, dtype=np.uint8), flags=1)
-        return self.cv_img
-
-    async def human_detection(self):
-        """detects human using kachaka's embedded model
-        """        
-        image, (header, objects) = await asyncio.gather(anext(self.stream_i), anext(self.stream_d))
-        self.cv_img = cv2.imdecode(np.frombuffer(image.data, dtype=np.uint8), flags=1) # roscompressed to img
-        objects = [n for n in objects if n.label==1]
         self.cv_img = undistort(self.cv_img, *self.undistort_map)
-        if len(objects) > 0:
-            self.cv_img = draw_box(self.cv_img, objects)
-            self.target_pos = process_object(objects) #x, y, w, h
-            if self.target_pos:
-                cv2.putText(self.cv_img, "X", (self.target_pos[0]+self.target_pos[2]//2, 
-                                          self.target_pos[1]+self.target_pos[3]//2), *lazy_cv2_txt_params)
-                self.target_found = True
-            else:
-                self.target_found = False
+
+    async def human_detection(self, image:np.ndarray):
+        """detects human using kachaka's embedded model
+        """
+        results = self.yolo_model(image)
+        results = [r for r in results if r.boxes.xywh.numel() > 0]
+        if len(results) > 0:
+            self.human_detection_result = results
+            res_boxes = [r.xywh for r in results]
+            res_boxes = [(n,n[2]*n[3]) for n in res_boxes]
+            res_boxes.sort(key=lambda x:x[1])
+            self.target_pos = res_boxes[-1][0]
+            self.target_found = True
         else:
             self.target_found = False
+            self.human_detection_result = None
+        
+    async def human_detection_annotate(self, image, do_draw_box=True, draw_target_marker=True):
+        if self.human_detection_result:
+            if do_draw_box:
+                draw_box(image, self.human_detection_result)
+            if draw_target_marker:
+                cv2.putText(self.cv_img, "X", (self.target_pos[0]+self.target_pos[2]//2,
+                                self.target_pos[1]+self.target_pos[3]//2), *lazy_cv2_txt_params)
 
     async def _prep_auto_control(self):
         """prepare automatic control
@@ -205,13 +213,13 @@ class KachakaFrame():
         else:
             self.being_controlled = False
 
-    async def annotate(self, st:float, show_fps = False, show_nearest_lidar = False, show_id = True):
+    async def annotate(self, image, st:float, show_fps = False, show_nearest_lidar = False, show_id = True):
         if show_fps:
-            self.cv_img = cv2.putText(self.cv_img, f"fps:{round(1/(time.time()-st))}", (20, 80), *lazy_cv2_txt_params)
+            cv2.putText(image, f"fps:{round(1/(time.time()-st))}", (20, 80), *lazy_cv2_txt_params)
         if show_nearest_lidar:
-            self.cv_img = cv2.putText(self.cv_img, f"{round(self.nearest_scan_dist, 3)}", (20, 140), *lazy_cv2_txt_params)
+            cv2.putText(image, f"{round(self.nearest_scan_dist, 3)}", (20, 140), *lazy_cv2_txt_params)
         if show_id:
-            self.cv_img = cv2.putText(self.cv_img, f"ID:{self.id}", (WIN_W-100,40), *lazy_cv2_txt_params)
+            cv2.putText(image, f"ID:{self.id}", (WIN_W-100,40), *lazy_cv2_txt_params)
 
     async def speak(self, txt:str):
         await self.async_client.speak(txt)
@@ -265,28 +273,28 @@ class KachakaFrame():
         if await self.check_navigate():
             await self.async_client.cancel_command()
 
-    async def _draw_orientation_line(self, deg, line_length=100):
+    async def _draw_orientation_line(self, deg, image, line_length=100):
         if self.target_found:
             d_linear, d_angular, x_r, area_r, tx, ty, tw, th = await self._prep_auto_control()
             rads = np.deg2rad(deg)
             center_x, center_y = tx+tw//2, ty+th
             end_x = int(center_x + line_length * np.cos(rads))
             end_y = int(center_y - line_length * np.sin(rads))
-            cv2.line(self.cv_img, (center_x, center_y), (end_x, end_y), BLUE, 3)
-            cv2.putText(self.cv_img, "deg="+str(round(deg,1)), (20,50), *lazy_cv2_txt_params)
+            cv2.line(image, (center_x, center_y), (end_x, end_y), BLUE, 3)
+            cv2.putText(image, "deg="+str(round(deg,1)), (20,50), *lazy_cv2_txt_params)
 
     async def mebow_annotate(self, line_length=100):
         # only if there is a result
         deg = self.mebow_model.ori + 90
         await self._draw_orientation_line(deg)
 
-    async def mp_landmark_annotate(self, line_length=100):
+    async def mp_landmark_annotate(self, image, line_length=100):
         m = self.mp_landmark_model
         if m.result.pose_landmarks:
             rads, _, _ = m._get_deg_from_landmarks()
             sign = -1 if m.facing_camera() else 1
             deg = sign*rads*180/np.pi
-            await self._draw_orientation_line(deg)
+            await self._draw_orientation_line(deg, image)
 
 class FaceDetect():
     def __init__(self):
@@ -532,11 +540,12 @@ def get_camera_info(client:kachaka_api.KachakaApiClient):
 def undistort(img, map_x, map_y):
     return cv2.remap(img, map_x, map_y, cv2.INTER_LINEAR)
 
-def draw_box(img, objects):
-    for obj in objects:
-        x, y, w, h = (obj.roi.x_offset, obj.roi.y_offset, obj.roi.width, obj.roi.height,)
+def draw_box(img, res):
+    for r in res:
+        x,y,w,h = r.boxes.xywh
+        conf = r.boxes.conf
         img = cv2.rectangle(img, (x,y), (x+w,y+h), color=GREEN, thickness=2)
-        img = cv2.putText(img, f"score:{round(obj.score,3)}", (x+20, y), FONT, 1, GREEN, 1)
+        img = cv2.putText(img, f"score:{round(conf,3)}", (x+20, y), FONT, 1, GREEN, 1)
     return img
 
 async def get_map_images(kachakas:KachakaFrame):
