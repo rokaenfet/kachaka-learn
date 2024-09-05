@@ -248,7 +248,6 @@ class MotorControl:
 
     def recv_set_param_data(self):
         data_recv = self.serial_.read_all()
-        print(data_recv)
         packets = self.__extract_packets(data_recv)
         for packet in packets:
             data = packet[7:15]
@@ -273,11 +272,9 @@ class MotorControl:
 
 
     def __process_set_param_packet(self, data, CANID, CMD):
-        print(CMD, CANID)
         if CMD == 0x11 and (data[2] == 0x33 or data[2] == 0x55):
             masterid=CANID
             slaveId = ((data[1] << 8) | data[0])
-            print(masterid, slaveId)
             if CANID==0x00:  #防止有人把MasterID设为0稳一手
                 masterid=slaveId
 
@@ -288,7 +285,6 @@ class MotorControl:
                     masterid=slaveId
 
             RID = data[3]
-            print(RID)
             # 读取参数得到的数据
             if is_in_ranges(RID):
                 #uint32类型
@@ -332,7 +328,7 @@ class MotorControl:
         can_id_l = Motor.SlaveID & 0xff #id low 8 bits
         can_id_h = (Motor.SlaveID >> 8)& 0xff  #id high 8 bits
         data_buf = np.array([np.uint8(can_id_l), np.uint8(can_id_h), 0x33, np.uint8(RID), 0x00, 0x00, 0x00, 0x00], np.uint8)
-        self.__send_data(Motor.slaveID, data_buf)
+        self.__send_data(Motor.SlaveID, data_buf)
         # self.__send_data(0x7FF, data_buf)
 
     def __write_motor_param(self, Motor, RID, data):
@@ -345,11 +341,10 @@ class MotorControl:
         else:
             # data is int
             data_buf[4:8] = data_to_uint8s(int(data))
-        print("data_buf=",data_buf)
         self.__send_data(Motor.SlaveID, data_buf)
         # self.__send_data(0x7FF, data_buf)
 
-    def switchControlMode(self, Motor, ControlMode):
+    def switchControlMode(self, Motor:Motor, ControlMode):
         """
         switch the control mode of the motor 切换电机控制模式
         :param Motor: Motor object 电机对象
@@ -359,7 +354,9 @@ class MotorControl:
         self.__write_motor_param(Motor, RID, np.uint8(ControlMode))
         sleep(0.1)
         self.recv_set_param_data()
+        print(Motor.SlaveID, self.motors_map)
         if Motor.SlaveID in self.motors_map:
+            print(RID, self.motors_map[Motor.SlaveID].temp_param_dict)
             if RID in self.motors_map[Motor.SlaveID].temp_param_dict:
                 if self.motors_map[Motor.SlaveID].temp_param_dict[RID] == ControlMode:
                     return True

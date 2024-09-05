@@ -23,7 +23,9 @@ think-pad pass:1234
 - `openpose`
   - cloned repo for HOE (Pose detection)
 - `stalk`
-  - contains files used during the make of main program
+  - contains files made during the make of main program
+- `motor`
+  - contains files used for learning to use the DAMIAO motor
 
 # Debug / Profile
 `scalene --cpu --memory --cli .\stalk\main.py`
