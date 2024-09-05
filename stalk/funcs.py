@@ -29,6 +29,13 @@ WIN_H = 720
 THRE = 30
 lazy_cv2_txt_params = (FONT, 3, GREEN, 3)
 
+SCREEN_NAME = "Fullscreen"
+cv2.namedWindow(SCREEN_NAME, cv2.WND_PROP_FULLSCREEN)
+cv2.setWindowProperty(SCREEN_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+SCREEN_W, SCREEN_H = cv2.getWindowImageRect(SCREEN_NAME)[2:4]
+cv2.destroyWindow(SCREEN_NAME)
+
+
 class KachakaFrame():
     def __init__(self, IP:str, id:int):
         self.id = id
@@ -45,6 +52,7 @@ class KachakaFrame():
         print(f"{C.GREEN}got{C.RESET} error code")
         self.need_to_emergency_stop = False
         self.target_found = False
+        print(f"{C.GREEN}set{C.RESET} manual control = True; auto homing = False")
         self.sync_client.set_manual_control_enabled(True)
         self.sync_client.set_auto_homing_enabled(False)
         self.linear = 0
@@ -58,6 +66,7 @@ class KachakaFrame():
         self.target_pos = None
         self.cv_img = None
 
+        print(f"{C.GREEN}got{C.RESET} media pipe face detector")
         self.face_detector = FaceDetect()
 
         self.locations = self.get_locations(["start","end"])
@@ -69,10 +78,14 @@ class KachakaFrame():
         self.cd = 0
 
         # models
+        print(f"{C.GREEN}got{C.RESET} MEBOW model")
         self.mebow_model = MEBOWFrame()
+        print(f"{C.GREEN}got{C.RESET} media pipe landmark detector")
         self.mp_landmark_model = MPLandmark()
 
-    async def process_kachaka(self): #DEPRECATED
+    async def process_kachaka(self):
+        """pipeline for main.py **DEPRECATED**
+        """
         st = time.time()
         self.linear, self.angular = 0, 0
         await self.move() # set speed to 0,0
@@ -83,6 +96,13 @@ class KachakaFrame():
         await self.annotate(st, True, False, True) # annotate img
 
     async def emergency_stop(self):
+        """ detect and perform emergency stop using LiDAR data
+        
+        scans LiDAR from kachaka and determines if kachaka should perform an emergency stop
+
+        Attibutes:
+            lidar_scan: coroutine get_ros_laser_scan()
+        """         
         lidar_scan = await self.async_client.get_ros_laser_scan()
         self.nearest_scan_dist = min([dist for dist in lidar_scan.ranges if dist > 0])
         if self.nearest_scan_dist < EMERGENCY_STOP_DISTANCE:
@@ -96,14 +116,25 @@ class KachakaFrame():
             print(f"ID:{self.id} has resumed moving!")
 
     async def move(self):
+        """change kachaka's linear and angular velocity
+        """        
         await self.async_client.set_robot_velocity(self.linear, self.angular)
 
     async def get_image_from_camera(self):
+        """get image frame from kachaka's image stream
+
+        Returns
+        -------
+        np.ndarray
+            BGR image array suited for cv2
+        """        
         image = await self.stream_i.__anext__()
         self.cv_img = cv2.imdecode(np.frombuffer(image.data, dtype=np.uint8), flags=1)
         return self.cv_img
 
     async def human_detection(self):
+        """detects human using kachaka's embedded model
+        """        
         image, (header, objects) = await asyncio.gather(anext(self.stream_i), anext(self.stream_d))
         self.cv_img = cv2.imdecode(np.frombuffer(image.data, dtype=np.uint8), flags=1) # roscompressed to img
         objects = [n for n in objects if n.label==1]
@@ -121,6 +152,20 @@ class KachakaFrame():
             self.target_found = False
 
     async def _prep_auto_control(self):
+        """prepare automatic control
+
+        Returns
+        -------
+        tuple
+            float
+                d_linear is the change in linear speed to make w.r.t size of detected human in frame
+            float
+                d_angular is the change in angular speed to make w.r.t horizontal offset from center
+            float
+                (horizontal offset from center) / width of screen
+            float
+                
+        """        
         tx, ty, tw, th = self.target_pos
         center_tx, center_ty = tx+tw//2, ty+th//2
         x_r = (WIN_W/2-center_tx)/WIN_W
@@ -417,10 +462,41 @@ class MPLandmark():
         d = nose-shoulder_mid
         return np.sign(d[2]) == -1
 
+def image_resize(image, width = None, height = None, inter = cv2.INTER_AREA):
+    # initialize the dimensions of the image to be resized and
+    # grab the image size
+    dim = None
+    (h, w) = image.shape[:2]
+
+    # if both the width and height are None, then return the
+    # original image
+    if width is None and height is None:
+        return image
+
+    # check to see if the width is None
+    if width is None:
+        # calculate the ratio of the height and construct the
+        # dimensions
+        r = height / float(h)
+        dim = (int(w * r), height)
+
+    # otherwise, the height is None
+    else:
+        # calculate the ratio of the width and construct the
+        # dimensions
+        r = width / float(w)
+        dim = (width, int(h * r))
+
+    # resize the image
+    resized = cv2.resize(image, dim, interpolation = inter)
+
+    # return the resized image
+    return resized
+
 async def display_kachakas(kachakas:list[KachakaFrame]):
-    imgs = [cv2.resize(n.cv_img, (640, 360)) for n in kachakas]
-    imgs = np.concatenate((imgs), axis=1)
-    cv2.imshow("", imgs)
+    image = np.concatenate(([kachaka.cv_img for kachaka in kachakas]), axis=1)
+    image = image_resize(image, width=SCREEN_W, height=SCREEN_H)
+    cv2.imshow("", image)
     cv2.waitKey(1)
 
 def move(client:kachaka_api.KachakaApiClient, linear:float, angular:float):

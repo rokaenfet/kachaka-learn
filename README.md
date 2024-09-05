@@ -67,6 +67,10 @@ think-pad pass:1234
 
 # Human-body orientation estimation
 
+![](asset/demo.gif)
+
+![](asset/demo1.JPG)
+
 - **Monocular Estimation of Body Orientation in the Wild**
   - [repo](https://github.com/ChenyanWu/MEBOW)
   - Works well camera captures whole body, except when facing away (angle prediction oscillates aggressively), otherwise unusable
