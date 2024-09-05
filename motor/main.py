@@ -4,7 +4,7 @@ import time
 import math
 import numpy as np
 import argparse
-# COM5, /dev/tty5, ttyACM0
+# COM5, /dev/tty5, /dev/ttyACM0
 parser = argparse.ArgumentParser(
 )
 parser.add_argument(
@@ -45,8 +45,7 @@ while i<10000:
     # motor_control.control_pos_force(motor, 10, 1000,100)
     # motor_control.control_Vel(motor, q*5)
     txt = ""
-    target = math.sin(time.time())*50
-    print(target)
+    target = math.sin(time.time())*3
 
     motor_control.control_Pos_Vel(motor,target,30)
 

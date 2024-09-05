@@ -332,7 +332,8 @@ class MotorControl:
         can_id_l = Motor.SlaveID & 0xff #id low 8 bits
         can_id_h = (Motor.SlaveID >> 8)& 0xff  #id high 8 bits
         data_buf = np.array([np.uint8(can_id_l), np.uint8(can_id_h), 0x33, np.uint8(RID), 0x00, 0x00, 0x00, 0x00], np.uint8)
-        self.__send_data(0x7FF, data_buf)
+        self.__send_data(Motor.slaveID, data_buf)
+        # self.__send_data(0x7FF, data_buf)
 
     def __write_motor_param(self, Motor, RID, data):
         can_id_l = Motor.SlaveID & 0xff #id low 8 bits
@@ -344,7 +345,9 @@ class MotorControl:
         else:
             # data is int
             data_buf[4:8] = data_to_uint8s(int(data))
-        self.__send_data(0x7FF, data_buf)
+        print("data_buf=",data_buf)
+        self.__send_data(Motor.SlaveID, data_buf)
+        # self.__send_data(0x7FF, data_buf)
 
     def switchControlMode(self, Motor, ControlMode):
         """
@@ -377,7 +380,8 @@ class MotorControl:
         can_id_h = (Motor.SlaveID >> 8)& 0xff  #id high 8 bits
         data_buf = np.array([np.uint8(can_id_l), np.uint8(can_id_h), 0xAA, 0x00, 0x00, 0x00, 0x00, 0x00], np.uint8)
         self.disable(Motor)  # before save disable the motor
-        self.__send_data(0x7FF, data_buf)
+        self.__send_data(Motor.SlaveID, data_buf)
+        # self.__send_data(0x7FF, data_buf)
         sleep(0.01)
 
     def change_limit_param(self, Motor_Type, PMAX, VMAX, TMAX):
@@ -400,7 +404,8 @@ class MotorControl:
         can_id_l = Motor.SlaveID & 0xff #id low 8 bits
         can_id_h = (Motor.SlaveID >> 8) & 0xff  #id high 8 bits
         data_buf = np.array([np.uint8(can_id_l), np.uint8(can_id_h), 0xCC, 0x00, 0x00, 0x00, 0x00, 0x00], np.uint8)
-        self.__send_data(0x7FF, data_buf)
+        self.__send_data(Motor.slaveID, data_buf)
+        # self.__send_data(0x7FF, data_buf)
         self.recv()  # receive the data from serial port
 
     def change_motor_param(self, Motor, RID, data):
