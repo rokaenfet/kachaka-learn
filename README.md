@@ -45,6 +45,14 @@ think-pad pass:1234
 - [ ] make kachaka move to the front side of the person via HOE or pose detection
   - [x] MP pose landmark > orientation for *full body*
 - [ ] move kachaka and external devices with mounted laptop
+  - [x] kachaka
+  - [ ] robot arm
+    - [ ] DAMIAO motor
+  - [ ] camera
+- [ ] Test model speeds
+  - [ ] human detection
+  - [ ] face detection
+  - [ ] HOE
 
 
 # Concurrency
