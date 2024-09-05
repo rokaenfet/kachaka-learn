@@ -4,13 +4,12 @@ import time
 import math
 import numpy as np
 import argparse
-
+# COM5, /dev/tty5, ttyACM0
 parser = argparse.ArgumentParser(
 )
 parser.add_argument(
     "--port",
     "-p",
-    choices=["COM5","/dev/ttyS5"],
     help="try COM[n] or /dev/ttyS[n]",
     type=str
 )
