@@ -3,8 +3,20 @@ import serial
 import time
 import math
 import numpy as np
+import argparse
 
-PORT = "/dev/ttyS5"
+parser = argparse.ArgumentParser(
+)
+parser.add_argument(
+    "--port",
+    "-p",
+    choices=["COM5","/dev/ttyS5"],
+    help="try COM[n] or /dev/ttyS[n]",
+    type=str
+)
+args = parser.parse_args()
+
+PORT = args.port
 BAUDRATE = 921600
 SLAVE_ID = 0x03
 MASTER_ID = 0x13
@@ -35,6 +47,7 @@ while i<10000:
     # motor_control.control_Vel(motor, q*5)
     txt = ""
     target = math.sin(time.time())*50
+    print(target)
 
     motor_control.control_Pos_Vel(motor,target,30)
 
