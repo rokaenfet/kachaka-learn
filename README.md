@@ -5,7 +5,8 @@ think-pad pass:1234
 
 # Execute
 1. activate venv
-2. `pip install -r requirements.txt; pip install -r ./MEBOW/requirements.txt`
+2. Get Damiao API `wget --no-check-certificate --content-disposition --directory-prefix=motor https://raw.githubusercontent.com/cmjang/DM_Control_Python/main/DM_CAN.py`
+3. `pip install -r requirements.txt; pip install -r ./MEBOW/requirements.txt`
 
 # Folder
 - `asset`
@@ -27,10 +28,6 @@ think-pad pass:1234
 # Debug / Profile
 `scalene --cpu --memory --cli .\stalk\main.py`
 
-# Command List
-![synchronous API calls](https://github.com/pf-robotics/kachaka-api/blob/main/docs/kachaka_api_client.ipynb)
-![asynchronous API calls](https://github.com/pf-robotics/kachaka-api/blob/main/docs/kachaka_api_client_async.ipynb)
-
 # TODO
 - [x] learn kachaka
 - [x] teleop with live cam and lidar display
@@ -49,6 +46,8 @@ think-pad pass:1234
   - [ ] robot arm
     - [ ] DAMIAO motor
   - [ ] camera
+    - [ ] RealSense
+    - [ ] e
 - [ ] Test model speeds
   - [ ] human detection
   - [ ] face detection
@@ -73,6 +72,11 @@ think-pad pass:1234
 # Kachaka
 - [specs](https://kachaka.life/technology/)
 
+## Command List
+[synchronous API calls](https://github.com/pf-robotics/kachaka-api/blob/main/docs/kachaka_api_client.ipynb)
+[asynchronous API calls](https://github.com/pf-robotics/kachaka-api/blob/main/docs/kachaka_api_client_async.ipynb)
+
+
 # Human-body orientation estimation
 
 ![](asset/demo.gif)
@@ -93,3 +97,35 @@ think-pad pass:1234
 - **MP Pose**
   - [web](https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker/python)
   - only works with full body
+
+# DAMIAO motor
+
+![](asset/damiao_setup.jpg)
+
+- [repo](https://github.com/cmjang/DM_Motor_Control)
+- [python repo](https://github.com/cmjang/DM_Control_Python/blob/main/DM_CAN.py)
+- send-and-receive mode
+- modified parameters gets reset after switching off
+- max phase current for DM43 series: 10.25A. By default current limit is set to 80% of max current 
+- **Drive Parameters**
+  - number of pole pairs
+  - under voltage: minimum voltage for motor to work
+  - over voltage: upper limit of driver's working voltage
+  - accel / deccel: using in non-MIT mode as limit
+  - reduction ratio: affect speed and position
+  - over temp: motor coil max temp
+  - CAN_ID: ID of driver receiving the CAN command
+  - CAN timeout: num of cycles for timeout
+  - speed limit:
+  - over current: percentage, max phase current
+- **Motor Parameters**: automatically identified by driver
+- **Control amplitude**: drive command param range settings
+  - PMAX: motor reaction value or ID for motor mapping
+  - VMAX: ~= PMAX
+  - TMAX: ~= PMAX
+  - KT_OUT: torque coefficient of motor. if motor params are accurate, set to 0
+  - Gear Coefficient: gear torque transmission
+- **Control Settings**
+  - Control Modes: MIT, vel pos, vle
+  - current bandwidth: gain conefficient default 1000
+  - KP/KI: for vel and pos mode respectably 
