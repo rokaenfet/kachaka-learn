@@ -6,9 +6,6 @@ import numpy as np
 import keyboard
 import mediapipe as mp
 import aioconsole
-from mediapipe.tasks import python
-from mediapipe.tasks.python import vision
-from mediapipe import solutions
 from mediapipe.framework.formats import landmark_pb2
 
 from mebow_model import MEBOWFrame
@@ -46,7 +43,7 @@ class KachakaFrame():
         self.stream_i = self.async_client.front_camera_ros_compressed_image.stream()
         self.stream_d = self.async_client.object_detection.stream()
         print(f"{C.GREEN}got{C.RESET} stream")
-        image = self.sync_client.get_front_camera_ros_compressed_image()
+        _ = self.sync_client.get_front_camera_ros_compressed_image()
         self.undistort_map = get_camera_info(self.sync_client)
         print(f"{C.GREEN}got{C.RESET} camera info")
         self.error_code = self.sync_client.get_robot_error_code()
@@ -138,7 +135,7 @@ class KachakaFrame():
     async def human_detection(self, image:np.ndarray):
         """detects human using kachaka's embedded model
         """
-        results = self.yolo_model(image)
+        results = self.yolo_model(image, verbose=False)
         results = [r for r in results if r.boxes.xywh.numel() > 0]
         if len(results) > 0:
             self.human_detection_result = results
