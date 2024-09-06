@@ -7,6 +7,7 @@ import keyboard
 import mediapipe as mp
 import aioconsole
 from mediapipe.framework.formats import landmark_pb2
+import winrt.windows.devices.enumeration as windows_devices
 
 from mebow_model import MEBOWFrame
 from ultralytics import YOLO
@@ -26,6 +27,7 @@ WIN_W = 1280
 WIN_H = 720
 THRE = 30
 lazy_cv2_txt_params = (FONT, 3, GREEN, 3)
+CAMERA_NAME = "HD Webcam eMeet C960"
 
 SCREEN_NAME = "Fullscreen"
 cv2.namedWindow(SCREEN_NAME, cv2.WND_PROP_FULLSCREEN)
@@ -597,6 +599,14 @@ async def object_monitor_key_press(kachakas:list[KachakaFrame]):
                 kachaka.sync_client.set_auto_homing_enabled(False)
                 kachaka.sync_client.return_home()
             break
+
+async def get_camera_index():
+    connected_cameras = await windows_devices.DeviceInformation.find_all_async(4)
+    names = [camera.name for camera in connected_cameras]
+    if CAMERA_NAME in names:
+        return names.index(CAMERA_NAME)
+    else:
+        print(f"{C.RED}Failed{C.RESET} to find {CAMERA_NAME} in device")
 
 async def anext(iterator, default=None):
     try:
