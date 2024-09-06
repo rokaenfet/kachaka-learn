@@ -12,27 +12,27 @@ KACHAKA_IPS = {
     # 2:"192.168.118.77:26400"
     }
 
+CAMERA_INDEX = 1
 SEARCH_PERIOD = 20 # iteration threshold for if face is found
 SEARCH_COOLDOWN = 20 # cooldown between locking onto 2 instances of detected human
 DURATION_FOR_CANCEL_NAV = 3 # duration until navigation is turned off when human is detected
+WINDOW_NAME = "full"
 
-async def detection_process(kachaka: KachakaFrame, image:np.ndarray):
+async def detection_process(kachaka: KachakaFrame):
     st = time.time()
-    await kachaka.human_detection(image)
+    await kachaka.human_detection()
     await asyncio.gather(
-        kachaka.face_detector.process(image),
-        kachaka.mp_landmark_model.process(image)
-        ) # face detection
+        kachaka.face_detector.process(kachaka.cv_img),
+        kachaka.mp_landmark_model.process(kachaka.cv_img)
+        )
 
     # Annotation task
     await asyncio.gather(
-        kachaka.annotate(image, st, show_fps=True, show_nearest_lidar=False, show_id=True), # fps, lidar_dist, id
-        # kachaka.human_detection_annotate(image),
-        # kachaka.mp_landmark_annotate(image), # mebow annotation
-        # kachaka.mp_landmark_model.draw_landmarks_on_image(image)
+        kachaka.annotate(st, show_fps=True, show_nearest_lidar=False, show_id=True), # fps, lidar_dist, id
+        # kachaka.human_detection_annotate(),
+        # kachaka.mp_landmark_annotate(), # mebow annotation
+        # kachaka.mp_landmark_model.draw_landmarks_on_image(kachaka.cv_img)
         )
-    
-    kachaka.cv_img = image
 
 async def controller(kachakas:list[KachakaFrame]):
     """
@@ -41,19 +41,28 @@ async def controller(kachakas:list[KachakaFrame]):
     """
     print(f"{C.GREEN}Loaded{C.RESET} controller()")
     # load external camera
-    cap = cv2.VideoCapture(2)
-    while any([kachaka.run for kachaka in kachakas]):
-        ret, image = cap.read()
-        tasks = [asyncio.create_task(kachaka.move()) for kachaka in kachakas]
-        print(image.shape)
-        if ret:
-            for i,kachaka in enumerate(kachakas):
-                tasks.append(asyncio.create_task(detection_process(kachaka,image)))
-        await asyncio.gather(
-            *tasks
-        )
-        print(image.shape)
-        await display_kachakas(kachakas)
+    # camera_index = asyncio.new_event_loop().run_until_complete(get_camera_index()) ONLY RUNS ON NEWER CPU ON WINDOWS
+    cap = cv2.VideoCapture(-1)
+    cv2.namedWindow(WINDOW_NAME, cv2.WND_PROP_FULLSCREEN)
+    cv2.setWindowProperty(WINDOW_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    if cap.isOpened():
+        while any([kachaka.run for kachaka in kachakas]):
+            ret, image = cap.read()
+            tasks = [asyncio.create_task(kachaka.move()) for kachaka in kachakas]
+            if ret:
+                for i,kachaka in enumerate(kachakas):
+                    kachaka.cv_img = image.copy()
+                    tasks.append(asyncio.create_task(detection_process(kachaka)))
+            await asyncio.gather(
+                *tasks
+            )
+            if ret:
+                cv2.imshow(WINDOW_NAME, await display_kachakas(kachakas))
+            cv2.waitKey(1)
+    else:
+        print(f"{C.RED}Failed{C.RESET} to access camera")
+    cap.release()
+    cv2.destroyAllWindows()
 
 async def main():
     # initiate clients

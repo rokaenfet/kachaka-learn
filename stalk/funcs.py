@@ -7,7 +7,7 @@ import keyboard
 import mediapipe as mp
 import aioconsole
 from mediapipe.framework.formats import landmark_pb2
-import winrt.windows.devices.enumeration as windows_devices
+# import winrt.windows.devices.enumeration as windows_devices
 
 from mebow_model import MEBOWFrame
 from ultralytics import YOLO
@@ -134,14 +134,14 @@ class KachakaFrame():
         self.cv_img = cv2.imdecode(np.frombuffer(image.data, dtype=np.uint8), flags=1)
         self.cv_img = undistort(self.cv_img, *self.undistort_map)
 
-    async def human_detection(self, image:np.ndarray):
-        """detects human using kachaka's embedded model
+    async def human_detection(self):
+        """detects human using kachaka yolov8
         """
-        results = self.yolo_model(image, verbose=False)
+        results = self.yolo_model(self.cv_img, verbose=False)[0]
         results = [r for r in results if r.boxes.xywh.numel() > 0]
         if len(results) > 0:
             self.human_detection_result = results
-            res_boxes = [r.xywh for r in results]
+            res_boxes = [r.boxes.xywh.numpy()[0] for r in results]
             res_boxes = [(n,n[2]*n[3]) for n in res_boxes]
             res_boxes.sort(key=lambda x:x[1])
             self.target_pos = res_boxes[-1][0]
@@ -150,10 +150,10 @@ class KachakaFrame():
             self.target_found = False
             self.human_detection_result = None
         
-    async def human_detection_annotate(self, image, do_draw_box=True, draw_target_marker=True):
+    async def human_detection_annotate(self, do_draw_box=True, draw_target_marker=True):
         if self.human_detection_result:
             if do_draw_box:
-                draw_box(image, self.human_detection_result)
+                self.cv_img = draw_box(self.cv_img, self.human_detection_result)
             if draw_target_marker:
                 cv2.putText(self.cv_img, "X", (self.target_pos[0]+self.target_pos[2]//2,
                                 self.target_pos[1]+self.target_pos[3]//2), *lazy_cv2_txt_params)
@@ -212,13 +212,13 @@ class KachakaFrame():
         else:
             self.being_controlled = False
 
-    async def annotate(self, image, st:float, show_fps = False, show_nearest_lidar = False, show_id = True):
+    async def annotate(self, st:float, show_fps = False, show_nearest_lidar = False, show_id = True):
         if show_fps:
-            cv2.putText(image, f"fps:{round(1/(time.time()-st))}", (20, 80), *lazy_cv2_txt_params)
+            cv2.putText(self.cv_img, f"fps:{round(1/(time.time()-st))}", (20, 80), *lazy_cv2_txt_params)
         if show_nearest_lidar:
-            cv2.putText(image, f"{round(self.nearest_scan_dist, 3)}", (20, 140), *lazy_cv2_txt_params)
+            cv2.putText(self.cv_img, f"{round(self.nearest_scan_dist, 3)}", (20, 140), *lazy_cv2_txt_params)
         if show_id:
-            cv2.putText(image, f"ID:{self.id}", (WIN_W-100,40), *lazy_cv2_txt_params)
+            cv2.putText(self.cv_img, f"ID:{self.id}", (WIN_W-100,40), *lazy_cv2_txt_params)
 
     async def speak(self, txt:str):
         await self.async_client.speak(txt)
@@ -287,13 +287,13 @@ class KachakaFrame():
         deg = self.mebow_model.ori + 90
         await self._draw_orientation_line(deg)
 
-    async def mp_landmark_annotate(self, image, line_length=100):
+    async def mp_landmark_annotate(self, line_length=100):
         m = self.mp_landmark_model
         if m.result.pose_landmarks:
             rads, _, _ = m._get_deg_from_landmarks()
             sign = -1 if m.facing_camera() else 1
             deg = sign*rads*180/np.pi
-            await self._draw_orientation_line(deg, image)
+            await self._draw_orientation_line(deg, self.cv_img)
 
 class FaceDetect():
     def __init__(self):
@@ -503,8 +503,7 @@ def image_resize(image, width = None, height = None, inter = cv2.INTER_AREA):
 async def display_kachakas(kachakas:list[KachakaFrame]):
     image = np.concatenate(([kachaka.cv_img for kachaka in kachakas]), axis=1)
     image = image_resize(image, width=SCREEN_W, height=SCREEN_H)
-    cv2.imshow("", image)
-    cv2.waitKey(1)
+    return image
 
 def move(client:kachaka_api.KachakaApiClient, linear:float, angular:float):
     client.set_robot_velocity(linear=linear, angular=angular)
