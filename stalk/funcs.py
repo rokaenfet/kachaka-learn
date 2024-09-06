@@ -10,6 +10,7 @@ from mediapipe.framework.formats import landmark_pb2
 import ultralytics.engine
 import ultralytics.engine.results
 import matplotlib.pyplot as plt
+import math
 
 from mebow_model import MEBOWFrame
 from ultralytics import YOLO
@@ -318,19 +319,43 @@ class KachakaFrame():
         m = self.mp_landmark_model
         if self.target_found and m.landmarks is not None:
             # TODO: angular offset between kachaka and camera, will be determined with robot arm later
-            angle_offset = 90
+            angle_offset = 90 #theta_k
             # get distance to target user
             target_deg = self._find_deg_from_landmarks() + 90 # +90 for offset
             target_rads = np.deg2rad(target_deg)
-            kachaka_deg = -angle_offset
+            kachaka_deg = 90-angle_offset
             kachaka_rads = np.deg2rad(kachaka_deg)
             z_dist = m.get_distance_to_hip()
             
-            if target_deg > 0:
-                
+            # math it out
+            def calculate_theta_d(r, D_step, theta_k):
+                """_summary_
+
+                Parameters
+                ----------
+                r : float
+                    distance from kachaka to target
+                D_step : float
+                    step size along circumference
+                theta_k : float
+                    angle offset between kachaka orientation and camera
+
+                Returns
+                -------
+                float
+                    delta angle for kachaka to get to next destination on circumference
+                """
+                theta_AB = math.acos((2 * r**2 - D_step**2) / (2 * r**2))
+                theta_d = math.degrees(theta_AB) - theta_k
+                return theta_d
+            
+            theta = calculate_theta_d(z_dist, z_dist/2, angle_offset)
 
             # calculate linear and angular vel required
-            self.async_client.set_robot_velocity()
+            self.get_locations()
+            x,y,rads = await self.async_client.get_robot_pose()
+            new_angle = rads+theta
+            await self.async_client.move_to_pose() # TODO: z_dist needs to be world isntead of local
 
             # visualize
             await self._visualize_adjusting_to_front(angle_offset)
