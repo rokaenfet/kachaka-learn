@@ -13,6 +13,7 @@ KACHAKA_IPS = {
     1: "192.168.118.159:26400",
     # 2: "192.168.118.77:26400"
 }
+WINDOW_NAME = ""
 
 # Constants for detection and navigation logic
 SEARCH_PERIOD = 20  # Iteration threshold for detecting if a face is found
@@ -28,9 +29,11 @@ async def detection_process(kachaka: KachakaFrame) -> None:
     st = time.time()
     
     # Run the detection processes asynchronously
-    await asyncio.gather(kachaka.human_detection())  # Object detection
-    await asyncio.gather(kachaka.face_detector.process(kachaka.cv_img))  # Face detection
-    await asyncio.gather(kachaka.mp_landmark_model.process(kachaka.cv_img))  # Landmark detection (HBOE / HOE)
+    await kachaka.human_detection()
+    await asyncio.gather(
+        kachaka.face_detector.process(kachaka.cv_img),
+        kachaka.mp_landmark_model.process(kachaka.cv_img)
+        )
     
     # Stalking stage: React to detected target
     if kachaka.target_found:
@@ -76,9 +79,11 @@ async def detection_process(kachaka: KachakaFrame) -> None:
 
     # Annotation task
     await asyncio.gather(
-        kachaka.annotate(st, show_fps=True, show_nearest_lidar=False, show_id=True),  # FPS, LIDAR distance, ID
-        kachaka.mp_landmark_annotate()  # MEBOW annotation
-    )
+        kachaka.annotate(st, show_fps=True, show_nearest_lidar=False, show_id=True), # fps, lidar_dist, id
+        kachaka.human_detection_annotate(), # YOLO
+        kachaka.mp_landmark_annotate(), # MP Landmark HOE
+        kachaka.mp_landmark_model.draw_landmarks_on_image(kachaka.cv_img) # draw landmarks
+        )
 
 async def controller(kachakas: List[KachakaFrame]) -> None:
     """
@@ -86,12 +91,32 @@ async def controller(kachakas: List[KachakaFrame]) -> None:
     the results. Navigation only runs if the Kachaka object has not found a target.
     """
     print(f"{C.GREEN}Loaded{C.RESET} controller()")
-    
-    while any(kachaka.run for kachaka in kachakas):
-        await asyncio.gather(
-            *[asyncio.create_task(detection_process(kachaka)) for kachaka in kachakas]
-        )
-        await display_kachakas(kachakas)
+
+    # load external camera
+    cap = cv2.VideoCapture(1, cv2.CAP_V4L2)
+    # cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920) # doesnt work
+    # cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080) # doesnt work
+    cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+    # cv2.setWindowProperty(WINDOW_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    if cap.isOpened():
+        while any([kachaka.run for kachaka in kachakas]):
+            ret, image = cap.read()
+            tasks = [asyncio.create_task(kachaka.move()) for kachaka in kachakas]
+            for i,kachaka in enumerate(kachakas):
+                kachaka.cv_img = image.copy()
+                tasks.append(asyncio.create_task(detection_process(kachaka)))
+            await asyncio.gather(
+                *tasks
+            )
+            cv2.imshow(WINDOW_NAME, await display_kachakas(kachakas))
+            cv2.resizeWindow(WINDOW_NAME, 1280, 720)
+            cv2.waitKey(1)
+    else:
+        print(f"{C.RED}Failed{C.RESET} to access camera")
+        for kachaka in kachakas:
+            kachaka.run = False
+    cap.release()
+    cv2.destroyAllWindows()
 
 async def navigator(kachaka: KachakaFrame) -> None:
     """

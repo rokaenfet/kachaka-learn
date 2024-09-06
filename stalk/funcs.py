@@ -9,6 +9,7 @@ import aioconsole
 from mediapipe.framework.formats import landmark_pb2
 import ultralytics.engine
 import ultralytics.engine.results
+import matplotlib.pyplot as plt
 
 from mebow_model import MEBOWFrame
 from ultralytics import YOLO
@@ -298,13 +299,40 @@ class KachakaFrame():
         deg = self.mebow_model.ori + 90
         await self._draw_orientation_line(deg)
 
+    def _find_deg_from_landmarks(self):
+        m = self.mp_landmark_model
+        rads, _, _ = m._get_deg_from_landmarks()
+        sign = -1 if m.facing_camera() else 1
+        deg = sign*rads*180/np.pi
+        return deg
+
     async def mp_landmark_annotate(self, line_length=100):
         m = self.mp_landmark_model
         if m.result.pose_landmarks:
-            rads, _, _ = m._get_deg_from_landmarks()
-            sign = -1 if m.facing_camera() else 1
-            deg = sign*rads*180/np.pi
+            deg = self._find_deg_from_landmarks()
             await self._draw_orientation_line(deg, self.cv_img)
+
+    async def adjust_to_front(self):
+        m = self.mp_landmark_model
+        if self.target_found and m.landmarks is not None:
+            # get distance to target user
+            lms = m.landmarks
+            deg = self._find_deg_from_landmarks()
+            rads = np.deg2rad(deg)
+            z_dist = m.get_distance_to_hip()
+            fig,ax = plt.subplots()
+            ax.add_artist(plt.Circle((0,0), z_dist/7, color="green", zorder=5))
+            ax.add_artist(plt.Circle((0,0), z_dist, color="blue", fill=False, linestyle="dashed", zorder=3))
+            ax.add_artist(plt.Circle((0,-z_dist), z_dist/7, color="black", zorder=3))
+            # ax.plot((0,0),(-z_dist,0), color="black", linestyle="solid", lw=1, zorder=4)
+            ax.plot((0,z_dist*np.cos(rads)),(0, z_dist*np.sin(rads)), color="orange", linestyle="solid", lw=1, zorder=4)
+            ax.text(0, z_dist/6, f'Radius = {round(z_dist,5)}\nAngle = {round(deg,3)}°', fontsize=12, ha='center', color='purple')
+            # ax.text(0, z_dist + z_dist/4, f'', fontsize=12, ha='center', color='purple')
+            c = 1.2
+            ax.set_xlim(-z_dist*c, z_dist*c)
+            ax.set_ylim(-z_dist*c, z_dist*c)
+            ax.set_aspect("equal")
+            fig.savefig("stalk/visualize.png")
 
 class FaceDetect():
     def __init__(self):
@@ -433,6 +461,12 @@ class MPLandmark():
                 rgb_image, self.result.pose_landmarks, self.mp_pose.POSE_CONNECTIONS
             )
     
+    def get_distance_to_hip(self):
+        l_hip = self._convert_to_ndarray(MPLandmark.LEFT_HIP)
+        r_hip = self._convert_to_ndarray(MPLandmark.RIGHT_HIP)
+        dist_z = abs(l_hip[2]-r_hip[2])/2
+        return dist_z
+
     def _get_deg_from_landmarks(self):
         l_shoulder = self._convert_to_ndarray(MPLandmark.LEFT_SHOULDER)
         r_shoulder = self._convert_to_ndarray(MPLandmark.RIGHT_SHOULDER)
