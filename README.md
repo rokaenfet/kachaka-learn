@@ -58,6 +58,20 @@ think-pad pass:1234
   - [ ] face detection
   - [ ] HOE
 
+---
+
+![](asset/math.jpg)
+
+
+
+- $\theta_e = 180 - 2*\theta$
+- $x_e = r\cdot cos(\theta_e)$
+- $y_e = r\cdot sin(\theta_e)$
+- $\frac{\sqrt{x_t^2+(y_t+r)^2}}{\theta_e} = \frac{r}{\theta}$
+  - $\theta^2x_t^2+\theta^2(y_t+r)^2=r^2\theta_e^2$
+  - $\theta^2r^2cos^2(\theta_e)+\theta^2r^2sin^2(\theta_e)+2r^2sin(\theta_e)+r^2-r^2\theta_e^2=0$
+  - $\theta_e^2-360\theta_e-180^2+8sin(\theta_e)+4-4\theta_e^2=0$
+  - $$
 
 # Concurrency
 

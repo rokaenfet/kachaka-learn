@@ -84,6 +84,8 @@ class KachakaFrame():
 
         self.yolo_model = YOLO("yolov8n.pt")
 
+        self.visualize_prev_locations = []
+
         # models
         print(f"{C.GREEN}got{C.RESET} MEBOW model")
         self.mebow_model = MEBOWFrame()
@@ -315,24 +317,60 @@ class KachakaFrame():
     async def adjust_to_front(self):
         m = self.mp_landmark_model
         if self.target_found and m.landmarks is not None:
+            # TODO: angular offset between kachaka and camera, will be determined with robot arm later
+            angle_offset = 90
             # get distance to target user
-            lms = m.landmarks
-            deg = self._find_deg_from_landmarks()
-            rads = np.deg2rad(deg)
+            target_deg = self._find_deg_from_landmarks() + 90 # +90 for offset
+            target_rads = np.deg2rad(target_deg)
+            kachaka_deg = -angle_offset
+            kachaka_rads = np.deg2rad(kachaka_deg)
+            z_dist = m.get_distance_to_hip()
+            
+            if target_deg > 0:
+                
+
+            # calculate linear and angular vel required
+            self.async_client.set_robot_velocity()
+
+            # visualize
+            await self._visualize_adjusting_to_front(angle_offset)
+            
+    async def _visualize_adjusting_to_front(self, angle_offset:float): # assumes camera is facing towards target
+        m = self.mp_landmark_model
+        if m.result.pose_landmarks:
+            target_deg = self._find_deg_from_landmarks() + 90 # +90 for offset
+            target_rads = np.deg2rad(target_deg)
+            kachaka_deg = -angle_offset
+            kachaka_rads = np.deg2rad(kachaka_deg)
             z_dist = m.get_distance_to_hip()
             fig,ax = plt.subplots()
-            ax.add_artist(plt.Circle((0,0), z_dist/7, color="green", zorder=5))
-            ax.add_artist(plt.Circle((0,0), z_dist, color="blue", fill=False, linestyle="dashed", zorder=3))
-            ax.add_artist(plt.Circle((0,-z_dist), z_dist/7, color="black", zorder=3))
-            # ax.plot((0,0),(-z_dist,0), color="black", linestyle="solid", lw=1, zorder=4)
-            ax.plot((0,z_dist*np.cos(rads)),(0, z_dist*np.sin(rads)), color="orange", linestyle="solid", lw=1, zorder=4)
-            ax.text(0, z_dist/6, f'Radius = {round(z_dist,5)}\nAngle = {round(deg,3)}°', fontsize=12, ha='center', color='purple')
+            center = (0,0)
+            kachaka = (0,-z_dist)
+            ax.add_artist(plt.Circle(*center, z_dist/7, color="green", zorder=5))
+            ax.add_artist(plt.Circle(*center, z_dist, color="blue", fill=False, linestyle="dashed", zorder=3))
+            ax.add_artist(plt.Circle(*kachaka, z_dist/7, color="black", zorder=3))
+            ax.arrow((kachaka[0],z_dist/2 * np.cos(kachaka_rads)), (kachaka[1], z_dist/2 * np.sin(kachaka_rads)),
+                    head_width=z_dist/8, head_length=z_dist/8, shape="full", color="black", linestyle="")
+            target_line = ((0,z_dist*np.cos(target_rads)),(0, z_dist*np.sin(target_rads)))
+            self.visualize_prev_locations.append(target_line)
+            if len(self.visualize_prev_locations) > 5:
+                self.visualize_prev_locations.pop(0)
+            for i,n in enumerate(self.visualize_prev_locations):
+                if i == len(self.visualize_prev_locations)-1:
+                    ax.arrow(*n, color="red", linestyle="solid", lw=1, zorder=4, 
+                             head_width=z_dist/8, head_length=z_dist/8, shape="full",)
+                else:
+                    ax.plot(*n, color="orange", linestyle="solid", lw=1, zorder=4, alpha=(255/5 * i)/255,
+                            head_width=z_dist/8, head_length=z_dist/8, shape="full",)
+            ax.text(0, z_dist/6, f'Radius = {round(z_dist,5)}\nAngle = {round(target_deg,1)}°', fontsize=12, ha='center', color='purple')
             # ax.text(0, z_dist + z_dist/4, f'', fontsize=12, ha='center', color='purple')
             c = 1.2
             ax.set_xlim(-z_dist*c, z_dist*c)
             ax.set_ylim(-z_dist*c, z_dist*c)
             ax.set_aspect("equal")
-            fig.savefig("stalk/visualize.png")
+            ax.axis("off")
+            fig.savefig("stalk/visualize.png", bbox_inches="tight")
+
 
 class FaceDetect():
     def __init__(self):
