@@ -41,10 +41,11 @@ async def controller(kachakas:list[KachakaFrame]):
     """
     print(f"{C.GREEN}Loaded{C.RESET} controller()")
     # load external camera
-    # camera_index = asyncio.new_event_loop().run_until_complete(get_camera_index()) ONLY RUNS ON NEWER CPU ON WINDOWS
-    cap = cv2.VideoCapture(1, cv2.CAP_DSHOW)
-    cv2.namedWindow(WINDOW_NAME, cv2.WND_PROP_FULLSCREEN)
-    cv2.setWindowProperty(WINDOW_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    cap = cv2.VideoCapture(1, cv2.CAP_V4L2)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920) # doesnt work
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080) # doesnt work
+    # cv2.namedWindow(WINDOW_NAME, cv2.WND_PROP_FULLSCREEN)
+    # cv2.setWindowProperty(WINDOW_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
     if cap.isOpened():
         while any([kachaka.run for kachaka in kachakas]):
             ret, image = cap.read()

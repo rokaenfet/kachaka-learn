@@ -49,7 +49,8 @@ think-pad pass:1234
     - [x] DAMIAO motor
   - [ ] camera
     - [ ] RealSense
-    - [ ] eMeet c960 webcams
+    - [x] eMeet c960 webcams
+      - [ ] allow full resolution (currently stuck on cv2 default 640x480. able to go to 1920x1080 using other codes)
 - [ ] Test model speeds
   - [ ] human detection
   - [ ] face detection

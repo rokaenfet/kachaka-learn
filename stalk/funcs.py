@@ -132,14 +132,15 @@ class KachakaFrame():
         self.cv_img = cv2.imdecode(np.frombuffer(image.data, dtype=np.uint8), flags=1)
         self.cv_img = undistort(self.cv_img, *self.undistort_map)
 
-    async def human_detection(self, image:np.ndarray):
+    async def human_detection(self):
         """detects human using kachaka's embedded model
         """
-        results = self.yolo_model(image, verbose=False)
+        results = self.yolo_model(self.cv_img, verbose=False)
         results = [r for r in results if r.boxes.xywh.numel() > 0]
         if len(results) > 0:
             self.human_detection_result = results
-            res_boxes = [r.xywh for r in results]
+            res_boxes = [r.boxes.xywh.numpy() for r in results]
+            print(res_boxes)
             res_boxes = [(n,n[2]*n[3]) for n in res_boxes]
             res_boxes.sort(key=lambda x:x[1])
             self.target_pos = res_boxes[-1][0]
