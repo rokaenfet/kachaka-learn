@@ -29,9 +29,9 @@ async def detection_process(kachaka: KachakaFrame):
     # Annotation task
     await asyncio.gather(
         kachaka.annotate(st, show_fps=True, show_nearest_lidar=False, show_id=True), # fps, lidar_dist, id
-        # kachaka.human_detection_annotate(),
-        # kachaka.mp_landmark_annotate(), # mebow annotation
-        # kachaka.mp_landmark_model.draw_landmarks_on_image(kachaka.cv_img)
+        kachaka.human_detection_annotate(), # YOLO
+        kachaka.mp_landmark_annotate(), # MP Landmark HOE
+        kachaka.mp_landmark_model.draw_landmarks_on_image(kachaka.cv_img) # draw landmarks
         )
 
 async def controller(kachakas:list[KachakaFrame]):
@@ -42,23 +42,22 @@ async def controller(kachakas:list[KachakaFrame]):
     print(f"{C.GREEN}Loaded{C.RESET} controller()")
     # load external camera
     cap = cv2.VideoCapture(1, cv2.CAP_V4L2)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920) # doesnt work
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080) # doesnt work
-    # cv2.namedWindow(WINDOW_NAME, cv2.WND_PROP_FULLSCREEN)
+    # cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920) # doesnt work
+    # cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080) # doesnt work
+    cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
     # cv2.setWindowProperty(WINDOW_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
     if cap.isOpened():
         while any([kachaka.run for kachaka in kachakas]):
             ret, image = cap.read()
             tasks = [asyncio.create_task(kachaka.move()) for kachaka in kachakas]
-            if ret:
-                for i,kachaka in enumerate(kachakas):
-                    kachaka.cv_img = image.copy()
-                    tasks.append(asyncio.create_task(detection_process(kachaka)))
+            for i,kachaka in enumerate(kachakas):
+                kachaka.cv_img = image.copy()
+                tasks.append(asyncio.create_task(detection_process(kachaka)))
             await asyncio.gather(
                 *tasks
             )
-            if ret:
-                cv2.imshow(WINDOW_NAME, await display_kachakas(kachakas))
+            cv2.imshow(WINDOW_NAME, await display_kachakas(kachakas))
+            cv2.resizeWindow(WINDOW_NAME, 1280, 720)
             cv2.waitKey(1)
     else:
         print(f"{C.RED}Failed{C.RESET} to access camera")
