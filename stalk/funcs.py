@@ -11,6 +11,7 @@ from mediapipe.framework.formats import landmark_pb2
 import ultralytics.engine
 import ultralytics.engine.results
 import matplotlib.pyplot as plt
+import math
 import sys
 import matplotlib.patches as mpatches
 
