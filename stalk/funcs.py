@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import math
 import sys
 import matplotlib.patches as mpatches
+from scipy import stats
 
 from mebow_model import MEBOWFrame
 from ultralytics import YOLO
@@ -546,12 +547,15 @@ class KachakaFrame():
                 # z_dist = m.get_distance_to_hip()
                 # z_dist = m.get_distance_to_shoulder()
                 """find global z_dist from depth sensor"""
-                landmark_ids = [MPLandmark.NOSE, MPLandmark.LEFT_SHOULDER, MPLandmark.RIGHT_SHOULDER, ]
-                l, r = m._convert_to_ndarray(MPLandmark.LEFT_SHOULDER), m._convert_to_ndarray(MPLandmark.RIGHT_SHOULDER)
-                l_z = self.realsense.get_depth_at_pixel(int(img_w*l[0]), int(img_h*l[1]), self.depth_image, self.color_image)
-                r_z = self.realsense.get_depth_at_pixel(int(img_w*r[0]), int(img_h*r[1]), self.depth_image, self.color_image)
-                if l_z is not None and r_z is not None: # continue only if depth can be retrieved
-                    z_dist = (l_z + r_z)/2 # distance in meter
+                l = [MPLandmark.NOSE, MPLandmark.LEFT_SHOULDER, MPLandmark.RIGHT_SHOULDER, MPLandmark.LEFT_EYE, 
+                                MPLandmark.RIGHT_EYE, MPLandmark.LEFT_HIP, MPLandmark.RIGHT_HIP]
+                l = [m._convert_to_ndarray(i) for i in l]
+                l = [self.realsense.get_depth_at_pixel(int(img_w*x), int(img_h*y), self.depth_image, self.color_image) for x,y,_ in l]
+                l = [n for n in l if n is not None]
+                l = filter_outliers_z_score(l, threshold = 3)
+                if len(l) > 0: # continue only if valid depth can be retrieved
+                    z_dist = np.average(l) # distance in meter
+                    print(z_dist)
                     d_step = z_dist/5 # chord len (dist to travel between 2 vertices on the circumference) in meter
                     (pose_x, pose_y), pose_theta  = await pose_task
                     pose_deg = np.rad2deg(pose_theta)
@@ -562,11 +566,11 @@ class KachakaFrame():
                     c = 2*math.asin(d_step/(2*z_dist)) # angle to turn
                     if target_deg+90 < 0:
                         new_pose = pose_theta - c
-                        self.linear = -d_step
+                        # self.linear = -d_step
                     else:
                         new_pose = pose_theta + c
-                        self.linear = d_step
-                    self.dest_pose = (pose_x, pose_y, new_pose)
+                        # self.linear = d_step
+                    # self.dest_pose = (pose_x, pose_y, new_pose)
                     
                     # print(f"target_deg:{round(target_deg,1)} | camera_deg:{round(camera_deg,1)} | kachaka_deg:{round(np.rad2deg(pose_theta),1)} | angle_to_turn:{round(np.rad2deg(angle_to_turn),1)}")
                     # visualize
@@ -946,6 +950,10 @@ def get_coords_from_angle(theta:float, r:float = 1) -> tuple[float, float]:
     """
     theta = theta % (2*math.pi)
     return (r*math.cos(theta), r*math.sin(theta))
+
+def filter_outliers_z_score(data: np.ndarray, threshold: float = 3.0) -> np.ndarray:
+    z_scores = np.abs(stats.zscore(data))
+    return data[z_scores < threshold]
 
 class C:
     RED = "\033[31m"
