@@ -3,10 +3,14 @@
 Learning kachaka-api
 think-pad pass:1234
 
+---
+
 # Execute
 1. activate venv
 2. Get Damiao API `wget --no-check-certificate --content-disposition --directory-prefix=motor https://raw.githubusercontent.com/cmjang/DM_Control_Python/main/DM_CAN.py`
 3. `pip install -r requirements.txt; pip install -r ./MEBOW/requirements.txt`
+
+---
 
 # Folder
 - `asset`
@@ -27,8 +31,12 @@ think-pad pass:1234
 - `motor`
   - contains files used for learning to use the DAMIAO motor
 
+---
+
 # Debug / Profile
 `scalene --cpu --memory --cli .\stalk\main.py`
+
+---
 
 # TODO
 - [x] learn kachaka
@@ -52,7 +60,7 @@ think-pad pass:1234
   - [ ] robot arm
     - [x] DAMIAO motor
   - [ ] camera
-    - [ ] RealSense
+    - [x] RealSense D435i [specs](https://www.intelrealsense.com/depth-camera-d435i/)
     - [x] eMeet c960 webcams
       - [ ] allow full resolution (currently stuck on cv2 default 640x480. able to go to 1920x1080 using other OS)
 - [ ] Test model speeds
@@ -75,6 +83,8 @@ think-pad pass:1234
   - $\theta_e^2-360\theta_e-180^2+8sin(\theta_e)+4-4\theta_e^2=0$
   - $$
 
+---
+
 # Concurrency
 
 ![](asset/Python-Concurrency-API-Choice.png)
@@ -90,6 +100,8 @@ think-pad pass:1234
 2. pool-based (e.g. process Pool) or class-based (e.g. Process class)?
    1. If using pool-based, Pool class or PoolExecutor class?
 
+---
+
 # Kachaka
 - [specs](https://kachaka.life/technology/)
 
@@ -97,6 +109,7 @@ think-pad pass:1234
 [synchronous API calls](https://github.com/pf-robotics/kachaka-api/blob/main/docs/kachaka_api_client.ipynb)
 [asynchronous API calls](https://github.com/pf-robotics/kachaka-api/blob/main/docs/kachaka_api_client_async.ipynb)
 
+---
 
 # Human-body orientation estimation
 
@@ -118,6 +131,8 @@ think-pad pass:1234
 - **MP Pose**
   - [web](https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker/python)
   - only works with full body
+
+---
 
 # DAMIAO motor
 
@@ -150,3 +165,14 @@ think-pad pass:1234
   - Control Modes: MIT, vel pos, vle
   - current bandwidth: gain conefficient default 1000
   - KP/KI: for vel and pos mode respectably 
+
+---
+
+# Intel realSense camera (D435i)
+| spec label | use-case(ideal) |
+| --- | --- |
+|min depth|~28cm|
+|depth acc|<2% at 2m|
+|depth fov|87deg x 58deg|
+|depth output res|1280x720|
+|depth max fps|90fps|

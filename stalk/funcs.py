@@ -17,6 +17,7 @@ import matplotlib.patches as mpatches
 
 from mebow_model import MEBOWFrame
 from ultralytics import YOLO
+import pyrealsense2 as rs
 import ultralytics
 
 FONT = cv2.FONT_HERSHEY_PLAIN
@@ -47,11 +48,170 @@ cv2.namedWindow(SCREEN_NAME, cv2.WINDOW_NORMAL)
 cv2.setWindowProperty(SCREEN_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 SCREEN_W, SCREEN_H = cv2.getWindowImageRect(SCREEN_NAME)[2:4]
 cv2.destroyWindow(SCREEN_NAME)
-SCREEN_W, SCREEN_H = 1280, 720
+SCREEN_W, SCREEN_H = 640, 480
+
+import pyrealsense2 as rs
+import numpy as np
+import cv2
+from typing import Tuple, Optional, Dict
 
 
+class RealSenseCamera:
+    def __init__(self, depth_width: int = 1280, depth_height: int = 720, 
+                 rgb_width: int = 1920, rgb_height: int = 1080, depth_fps: int = 30, rgb_fps: int = 30) -> None:
+        # Configuration parameters
+        self.depth_width: int = depth_width
+        self.depth_height: int = depth_height
+        self.depth_fps: int = depth_fps
+        # ---
+        self.rgb_width: int = rgb_width
+        self.rgb_height: int = rgb_height
+        self.rgb_fps: int = rgb_fps
+
+        # Create a pipeline
+        self.pipeline: rs.pipeline = rs.pipeline()
+
+        # check device and config
+        pipeline = rs.pipeline()
+        config = rs.config()
+        pipeline_wrapper = rs.pipeline_wrapper(pipeline)
+        pipeline_profile = config.resolve(pipeline_wrapper)
+        device = pipeline_profile.get_device()
+        device_product_line = str(device.get_info(rs.camera_info.product_line))
+        print(f"{C.BLUE}Detected Camera{C.RESET}: {device_product_line}")
+        found_rgb = False
+        for s in device.sensors:
+            if s.get_info(rs.camera_info.name) == 'RGB Camera':
+                found_rgb = True
+                break
+        if not found_rgb:
+            print(f"{C.RED}Failed{C.RESET} to find RGB camera in RealSense")
+            sys.exit()
+        
+        # Create a config object and enable streams
+        self.config: rs.config = rs.config()
+        self.config.enable_stream(rs.stream.depth, depth_width, depth_height, rs.format.z16, depth_fps)
+        self.config.enable_stream(rs.stream.color, rgb_width, rgb_height, rs.format.bgr8, rgb_fps)
+        
+        # Start pipeline
+        self.profile = self.pipeline.start(self.config)
+        
+        # Align depth to color
+        self.align: rs.align = rs.align(rs.stream.color)
+        
+        # Set depth scaling (to convert depth from integer to meters)
+        self.depth_scale: float = self.get_depth_scale()
+
+        # Post-processing filters
+        self.depth_to_disparity = rs.disparity_transform(True)
+        self.spatial_filter = rs.spatial_filter()
+        self.temporal_filter = rs.temporal_filter()
+        self.disparity_to_depth = rs.disparity_transform(False)
+
+        print(f"{C.GREEN}Loaded{C.RESET} RealSense Camera variables")
+
+    def get_depth_scale(self) -> float:
+        """
+        Get the depth scale from the camera to convert depth values to meters.
+        """
+        profile: rs.pipeline_profile = self.pipeline.get_active_profile()
+        depth_sensor: rs.sensor = profile.get_device().first_depth_sensor()
+        return depth_sensor.get_depth_scale()
+    
+    def get_depth_at_pixel(self, x: int, y: int, depth_image: np.ndarray, color_image: np.ndarray) -> Optional[float]:
+        """
+        Get the depth value at the specific pixel (x, y) in the color image.
+        Returns the depth in meters, or None if depth data is unavailable.
+        """
+        if depth_image.shape[:2] != color_image.shape[:2]:
+            return None
+        if depth_image is None or color_image is None:
+            return None
+
+        # Ensure the pixel coordinates are within the depth image bounds
+        if 0 <= x < depth_image.shape[1] and 0 <= y < depth_image.shape[0]:
+            depth_value = depth_image[y, x]  # Depth is in millimeters
+            if depth_value == 0:
+                return None
+            return depth_value * self.depth_scale  # Convert depth to meters
+        else:
+            return None
+
+    def get_frames(self) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+        """
+        Wait for the next set of frames and return aligned depth and color images.
+        Returns a tuple of (depth_image, color_image), or (None, None) if frames are unavailable.
+        """
+        frames: rs.frameset = self.pipeline.wait_for_frames()
+        aligned_frames: rs.frameset = self.align.process(frames)
+        depth_frame: rs.frame = aligned_frames.get_depth_frame()
+        color_frame: rs.frame = aligned_frames.get_color_frame()
+
+        if not depth_frame or not color_frame:
+            return None, None
+        
+        # Apply post-processing filters
+        depth_frame = self.apply_post_processing(depth_frame)
+        
+        # Convert frames to numpy arrays
+        depth_image: np.ndarray = np.asanyarray(depth_frame.get_data())
+        color_image: np.ndarray = np.asanyarray(color_frame.get_data())
+        
+        return depth_image, color_image
+
+    def apply_post_processing(self, depth_frame: rs.frame) -> rs.frame:
+        """
+        Apply post-processing filters to improve depth data quality.
+        """
+        depth_frame = self.depth_to_disparity.process(depth_frame)
+        depth_frame = self.spatial_filter.process(depth_frame)
+        depth_frame = self.temporal_filter.process(depth_frame)
+        depth_frame = self.disparity_to_depth.process(depth_frame)
+        return depth_frame
+
+    def get_intrinsics(self) -> Dict[str, rs.intrinsics]:
+        """
+        Get the intrinsic camera parameters for both depth and color streams.
+        Returns a dictionary with 'depth_intrinsics' and 'color_intrinsics'.
+        """
+        depth_stream: rs.video_stream_profile = self.profile.get_stream(rs.stream.depth).as_video_stream_profile()
+        color_stream: rs.video_stream_profile = self.profile.get_stream(rs.stream.color).as_video_stream_profile()
+        
+        depth_intrinsics: rs.intrinsics = depth_stream.get_intrinsics()
+        color_intrinsics: rs.intrinsics = color_stream.get_intrinsics()
+        
+        return {'depth_intrinsics': depth_intrinsics, 'color_intrinsics': color_intrinsics}
+
+    def get_extrinsics(self) -> rs.extrinsics:
+        """
+        Get the extrinsic parameters (transformation) between depth and color streams.
+        Returns an rs.extrinsics object.
+        """
+        depth_stream: rs.stream_profile = self.profile.get_stream(rs.stream.depth)
+        color_stream: rs.stream_profile = self.profile.get_stream(rs.stream.color)
+        
+        extrinsics: rs.extrinsics = depth_stream.get_extrinsics_to(color_stream)
+        return extrinsics
+
+    def get_colormap(self, depth_image: np.ndarray) -> np.ndarray:
+        """
+        Convert depth image to a color map for visualization.
+        """
+        depth_colormap: np.ndarray = cv2.applyColorMap(
+            cv2.convertScaleAbs(depth_image, alpha=0.03), cv2.COLORMAP_JET
+        )
+        return depth_colormap
+
+    def stop(self) -> None:
+        """
+        Stop the pipeline and release any resources.
+        """
+        self.pipeline.stop()
+        cv2.destroyAllWindows()
+    
 class KachakaFrame():
     human_detection_result: ultralytics.engine.results.Boxes
+
     def __init__(self, IP:str, id:int):
         self.id = id
         self.sync_client = kachaka_api.KachakaApiClient(IP)
@@ -72,38 +232,53 @@ class KachakaFrame():
         self.sync_client.set_auto_homing_enabled(False)
         # self.sync_client.undock_shelf()
         # self.sync_client.dock_shelf()
+
+        # auxilary vars
+        # needed vars
         self.linear = 0
         self.angular = 0
+        self.target_pos = None
+        self.cv_img = None
+        self.dest_pose = None
+        # unused vars
         self.being_controlled = False
         self.human_found_count = 0
         self.face_found_count = 0
         self.find_face_mode = False
         self.target_near = False
+        self.cd = 0
 
-        self.target_pos = None
-        self.cv_img = None
-
-        print(f"{C.GREEN}got{C.RESET} media pipe face detector")
+        # get models
         self.face_detector = FaceDetect()
+        print(f"{C.GREEN}Got{C.RESET} media pipe face detector")
+        self.yolo_model = YOLO("yolov8n.pt")
+        print(f"{C.GREEN}Got{C.RESET} YOLOv8")
+        self.mebow_model = MEBOWFrame()
+        print(f"{C.GREEN}Got{C.RESET} MEBOW model")
+        self.mp_landmark_model = MPLandmark()
+        print(f"{C.GREEN}Got{C.RESET} media pipe landmark detector")
 
+        # load realsense camera
+        self.realsense = RealSenseCamera(
+            depth_width=1280,
+            depth_height=720,
+            depth_fps=30,
+            rgb_width=1280,
+            rgb_height=720,
+            rgb_fps=30,
+        )
+        self.color_image = None
+        self.depth_image = None
+
+        # vars for navigations
         self.locations = self.get_locations(["start","end"])
         self.nav_i = 0
         self.run = True
         self.run_nav = True
         self.navigating = False
 
-        self.cd = 0
-
-        self.yolo_model = YOLO("yolov8n.pt")
-
+        # var for visualization
         self.visualize_prev_locations = []
-        self.dest_pose = None
-
-        # models
-        print(f"{C.GREEN}got{C.RESET} MEBOW model")
-        self.mebow_model = MEBOWFrame()
-        print(f"{C.GREEN}got{C.RESET} media pipe landmark detector")
-        self.mp_landmark_model = MPLandmark()
 
     async def emergency_stop(self):
         """ detect and perform emergency stop using LiDAR data
@@ -162,11 +337,11 @@ class KachakaFrame():
         self.cv_img = cv2.imdecode(np.frombuffer(image.data, dtype=np.uint8), flags=1)
         self.cv_img = undistort(self.cv_img, *self.undistort_map)
 
-    async def human_detection(self):
+    async def human_detection(self, image:np.ndarray):
         """detects human using kachaka's embedded model
         """
-        results = self.yolo_model(self.cv_img, verbose=False)[0]
-        results = [r for r in results if r.boxes.xywh.numel() > 0]
+        results = self.yolo_model(image, verbose=False, conf=0.5)[0]
+        results = [r for r in results if r.boxes.xywh.numel() > 0 and r.boxes.cls.numpy()[0] == 0]
         if len(results) > 0:
             self.human_detection_result = results
             res_boxes = [r.boxes.xywh.numpy()[0] for r in results]
@@ -331,9 +506,23 @@ class KachakaFrame():
 
     async def mp_landmark_annotate(self, line_length=100):
         m = self.mp_landmark_model
-        if m.result.pose_landmarks:
-            deg = self._find_deg_from_landmarks()
+        # draw if landmark is found and the landmarks are within the target human's bounding box
+        if m.result.pose_landmarks and self._is_landmark_in_bbox():
+            deg = self._find_deg_from_landmarks() # estimate deg from relative z distance to specific landmarks
             await self._draw_orientation_line(deg, self.cv_img)
+            await m.draw_landmarks_on_image(self.cv_img)
+
+    def _is_landmark_in_bbox(self):
+        w,h,_ = self.cv_img.shape
+        # get unnormalized coords of landmarks and check if its within bounding box
+        t = [self.mp_landmark_model._convert_to_ndarray(i) for i in 
+             [MPLandmark.NOSE, MPLandmark.LEFT_SHOULDER, MPLandmark.RIGHT_SHOULDER]]
+        t = [[norm_x*w, norm_y*h] for norm_x, norm_y, _ in t]
+        return all([self._is_coord_in_bbox(*n) for n in t])
+
+    def _is_coord_in_bbox(self, tx, ty):
+        x,y,w,h = self.target_pos
+        return x<=tx<=x+w and y<=ty<=y+h
 
     async def get_robot_pose(self):
         """
@@ -345,6 +534,7 @@ class KachakaFrame():
     
     async def adjust_to_front(self):
         m = self.mp_landmark_model
+        img_w, img_h, _ = self.color_image.shape
         if self.target_found and m.landmarks is not None:
             # only if dest_pose is empty, to prevent the kachaka robot overloading
             # and if z_dist is relatively close
@@ -352,31 +542,35 @@ class KachakaFrame():
                 pose_task = asyncio.create_task(self.get_robot_pose())
                 # get distance to target user
                 target_deg = self._find_deg_from_landmarks() # +90 for offset
+                """DEPRECATED: find relative z_dist using landmarks from HOE"""
                 # z_dist = m.get_distance_to_hip()
-                z_dist = m.get_distance_to_shoulder()
-                d_step = z_dist / 4 # chord len (dist to travel between 2 vertices on the circumference)
-                (pose_x, pose_y), pose_theta  = await pose_task
-                pose_deg = np.rad2deg(pose_theta)
-                # pose_theta = np.deg2rad(pose_deg)
-                # TODO: angular offset in the x-axis between kachaka and camera, will be determined with robot arm later
-                camera_to_kachaka_offset = 90-pose_deg # assume camera is placed 90deg against kachaka and sees person up front
-                camera_deg = -90 # camera assumed to always face human
-                c = 2*math.asin(d_step/(2*z_dist)) # angle to turn
-                if target_deg+90 < 0:
-                    new_pose = pose_theta - c
-                    self.linear = -1
-                else:
-                    new_pose = pose_theta + c
-                    self.linear = 1
-                print(z_dist)
-                self.dest_pose = (pose_x, pose_y, new_pose)
-                """
-                pose_deg = 0
-                2*math.asin(d_step/(2*z_dist))
-                """
-                # print(f"target_deg:{round(target_deg,1)} | camera_deg:{round(camera_deg,1)} | kachaka_deg:{round(np.rad2deg(pose_theta),1)} | angle_to_turn:{round(np.rad2deg(angle_to_turn),1)}")
-                # visualize
-                await self._visualize_adjusting_to_front(z_dist, np.deg2rad(target_deg), np.deg2rad(camera_deg), d_step, new_pose, pose_theta)
+                # z_dist = m.get_distance_to_shoulder()
+                """find global z_dist from depth sensor"""
+                landmark_ids = [MPLandmark.NOSE, MPLandmark.LEFT_SHOULDER, MPLandmark.RIGHT_SHOULDER, ]
+                l, r = m._convert_to_ndarray(MPLandmark.LEFT_SHOULDER), m._convert_to_ndarray(MPLandmark.RIGHT_SHOULDER)
+                l_z = self.realsense.get_depth_at_pixel(int(img_w*l[0]), int(img_h*l[1]), self.depth_image, self.color_image)
+                r_z = self.realsense.get_depth_at_pixel(int(img_w*r[0]), int(img_h*r[1]), self.depth_image, self.color_image)
+                if l_z is not None and r_z is not None: # continue only if depth can be retrieved
+                    z_dist = (l_z + r_z)/2 # distance in meter
+                    d_step = z_dist/5 # chord len (dist to travel between 2 vertices on the circumference) in meter
+                    (pose_x, pose_y), pose_theta  = await pose_task
+                    pose_deg = np.rad2deg(pose_theta)
+                    # pose_theta = np.deg2rad(pose_deg)
+                    # TODO: angular offset in the x-axis between kachaka and camera, will be determined with robot arm later
+                    camera_to_kachaka_offset = 90-pose_deg # assume camera is placed 90deg against kachaka and sees person up front
+                    camera_deg = -90 # camera assumed to always face human
+                    c = 2*math.asin(d_step/(2*z_dist)) # angle to turn
+                    if target_deg+90 < 0:
+                        new_pose = pose_theta - c
+                        self.linear = -d_step
+                    else:
+                        new_pose = pose_theta + c
+                        self.linear = d_step
+                    self.dest_pose = (pose_x, pose_y, new_pose)
+                    
+                    # print(f"target_deg:{round(target_deg,1)} | camera_deg:{round(camera_deg,1)} | kachaka_deg:{round(np.rad2deg(pose_theta),1)} | angle_to_turn:{round(np.rad2deg(angle_to_turn),1)}")
+                    # visualize
+                    await self._visualize_adjusting_to_front(z_dist, np.deg2rad(target_deg), np.deg2rad(camera_deg), d_step, new_pose, pose_theta)
             
     async def _visualize_adjusting_to_front(self, z_dist, target_rads, camera_rads, step_distance, angle_to_turn, kachaka_theta): # assumes camera is facing towards target
         m = self.mp_landmark_model
@@ -419,7 +613,6 @@ class KachakaFrame():
             ax.axis("off")
             ax.legend()
             fig.savefig("stalk/visualize.png", bbox_inches="tight")
-
 
 class FaceDetect():
     def __init__(self):
@@ -639,7 +832,6 @@ def image_resize(image, width = None, height = None, inter = cv2.INTER_AREA):
     return resized
 
 async def display_kachakas(kachakas:list[KachakaFrame]):
-    # print(SCREEN_W, SCREEN_H)
     image = np.concatenate(([kachaka.cv_img for kachaka in kachakas]), axis=1)
     image = image_resize(image, width=SCREEN_W, height=SCREEN_H)
     return image
