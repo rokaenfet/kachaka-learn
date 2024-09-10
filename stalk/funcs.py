@@ -105,18 +105,6 @@ class KachakaFrame():
         print(f"{C.GREEN}got{C.RESET} media pipe landmark detector")
         self.mp_landmark_model = MPLandmark()
 
-    async def process_kachaka(self):
-        """pipeline for main.py **DEPRECATED**
-        """
-        st = time.time()
-        self.linear, self.angular = 0, 0
-        await self.move() # set speed to 0,0
-        await self.control() # key and auto control
-        await self.move() # move with the updated speed
-        await self.emergency_stop() # detect for emergency stops
-        await self.human_detection() # detect human
-        await self.annotate(st, True, False, True) # annotate img
-
     async def emergency_stop(self):
         """ detect and perform emergency stop using LiDAR data
         

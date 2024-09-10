@@ -52,7 +52,7 @@ think-pad pass:1234
   - [ ] camera
     - [ ] RealSense
     - [x] eMeet c960 webcams
-      - [ ] allow full resolution (currently stuck on cv2 default 640x480. able to go to 1920x1080 using other codes)
+      - [ ] allow full resolution (currently stuck on cv2 default 640x480. able to go to 1920x1080 using other OS)
 - [ ] Test model speeds
   - [ ] human detection
   - [ ] face detection
