@@ -44,6 +44,8 @@ think-pad pass:1234
 - [ ] make kachaka move to the front side of the person via HOE or pose detection
   - [x] MP pose landmark > orientation for *full body*
   - [ ] circle around target in fixed distance till face can be seen
+    - [x] circle angle calculation
+    - [ ] circle step calculation
   - [ ] adjust distance to target s.t. face can be seen
 - [ ] move kachaka and external devices with mounted laptop
   - [x] kachaka
