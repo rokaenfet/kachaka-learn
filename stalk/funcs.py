@@ -606,7 +606,7 @@ class KachakaFrame():
         m = self.mp_landmark_model
         rads, _, _ = m._get_deg_from_landmarks()
         sign = -1 if m.facing_camera() else 1
-        deg = sign*rads*180/np.pi
+        deg = np.rad2deg(sign*rads)
         return deg
 
     async def mp_landmark_annotate(self, line_length=100):
@@ -654,7 +654,7 @@ class KachakaFrame():
                 """find global z_dist from depth sensor"""
                 # l = [MPLandmark.NOSE, MPLandmark.LEFT_SHOULDER, MPLandmark.RIGHT_SHOULDER, MPLandmark.LEFT_EYE, 
                 #                 MPLandmark.RIGHT_EYE, MPLandmark.LEFT_HIP, MPLandmark.RIGHT_HIP]
-                l = [i for i in range(33)]
+                l = [i for i in range(33)] # search from every available landmark (max 33)
                 l = [m._convert_to_ndarray(i) for i in l]
                 l = [self.realsense.get_depth_at_pixel(int(img_w*x), int(img_h*y), self.depth_image, self.color_image) for x,y,_ in l]
                 l = filter_outliers_IQR(np.array([n for n in l if n is not None],dtype=float))
@@ -665,12 +665,8 @@ class KachakaFrame():
                     pose_deg = np.rad2deg(pose_theta)
                     # pose_theta = np.deg2rad(pose_deg)
                     # TODO: angular offset in the x-axis between kachaka and camera, will be determined with robot arm later
-                    camera_to_kachaka_offset = 90-pose_deg # assume camera is placed 90deg against kachaka and sees person up front
-                    camera_deg = -90 # camera assumed to always face human
+                    camera_deg = -90 # camera fixed atm
                     # get angle to turn by
-                    """
-                    d_step = 2 * z_dist * sin(c/2)
-                    """
                     target_rad = np.deg2rad(target_deg)
                     camera_to_target_rad = mod_radians(target_rad+math.pi)-pose_theta
                     if abs(camera_to_target_rad) < STRAIGHT_FOV_THRE: # looking straight forward to person
@@ -712,17 +708,20 @@ class KachakaFrame():
             fig,ax = plt.subplots(figsize=(12,8))
             center = (0,0)
             kachaka = get_coords_from_angle(kachaka_theta, z_dist)
+            kachaka_look_rad = mod_radians(kachaka_theta - math.pi/2)
+            camera_look_rad = mod_radians(kachaka_theta + math.pi)
             arrow_sca = 40
             ax.add_artist(plt.Circle(center, z_dist/13, color="green", zorder=5, label="human")) # circle center
             ax.add_artist(plt.Circle(center, z_dist, color="blue", fill=False, linestyle="dashed", zorder=5)) # circumference
             ax.add_artist(plt.Circle(kachaka, z_dist/13, color="black", zorder=5)) #kachaka obj
             # kachaka pov
-            kachaka_arrow = ax.arrow(kachaka[0], kachaka[1], *get_coords_from_angle(kachaka_theta-math.pi/2, z_dist/2), width=z_dist/arrow_sca, shape="full", color="black", linestyle="", label="Kachaka")
+            kachaka_arrow = ax.arrow(*kachaka, *get_coords_from_angle(kachaka_look_rad, z_dist/2), width=z_dist/arrow_sca, shape="full", color="black", linestyle="", label="Kachaka")
             ax.text(kachaka[0]+z_dist/3, kachaka[1], f"Kachaka:{round(np.rad2deg(kachaka_theta),1)}°", fontsize=12, ha='center', color='black')
             # camera pov
-            camera_arrow = ax.arrow(kachaka[0], kachaka[1], *get_coords_from_angle(kachaka_theta-math.pi/2-camera_rads, -z_dist/2), width=z_dist/arrow_sca, shape="full", color="yellow", linestyle="", label="camera")
+            camera_arrow = ax.arrow(*kachaka, *get_coords_from_angle(camera_look_rad, -z_dist/2), width=z_dist/arrow_sca, shape="full", color="yellow", linestyle="", label="camera")
             # past target lines
-            self.visualize_prev_locations.append((0, 0, *get_coords_from_angle(kachaka_theta-math.pi/2+target_rads, -z_dist)))
+            # TODO: fix all angle references below and check ones I edited on wed
+            self.visualize_prev_locations.append((*center, *get_coords_from_angle(kachaka_theta-math.pi/2+target_rads, -z_dist)))
             if len(self.visualize_prev_locations) > 5:
                 self.visualize_prev_locations.pop(0)
             for i,n in enumerate(self.visualize_prev_locations):
