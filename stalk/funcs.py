@@ -692,7 +692,7 @@ class KachakaFrame():
                                 dx, dy = get_coords_from_angle(new_rad, d_step)
                         else: # TODO: take fixed steps along circumference
                             d_step = min(z_dist/2, 3) # chord len (dist to travel between 2 vertices on the circumference) in meter
-                            c = 2*math.asin(d_step/(2*z_dist)) # angle to turn
+                            c = 2*math.asin(2*d_step/z_dist) # angle to turn
                             if target_deg+90 < 0:
                                 new_rad = mod_radians(pose_theta - c)
                                 dx, dy = get_coords_from_angle(new_rad, d_step)
