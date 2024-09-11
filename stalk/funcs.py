@@ -47,6 +47,8 @@ MAX_LINEAR_SPEED = 1
 MAX_ANGULAR_SPEED = 1
 MOVE_ANGLE_THRE = 0.03
 MOVE_EUCLIDEAN_DIST_THRE = 0.03
+STRAIGHT_FOV_THRE = math.pi/8 # rads
+MAX_D_STEP = 3 # meter
 
 # SCREEN_NAME = "Fullscreen"
 # cv2.namedWindow(SCREEN_NAME, cv2.WINDOW_NORMAL)
@@ -659,22 +661,46 @@ class KachakaFrame():
                 if len(l) > 10: # continue only if valid depths can be retrieved
                     z_dist = np.average(l) # distance in meter
                     logging.debug(f"[{self.id}]KachakaFrame.adjust_to_front(). z_dist:{z_dist}, l:{len(l)}/33")
-                    d_step = min(z_dist/4, 1) # chord len (dist to travel between 2 vertices on the circumference) in meter
                     (pose_x, pose_y), pose_theta  = await pose_task
                     pose_deg = np.rad2deg(pose_theta)
                     # pose_theta = np.deg2rad(pose_deg)
                     # TODO: angular offset in the x-axis between kachaka and camera, will be determined with robot arm later
                     camera_to_kachaka_offset = 90-pose_deg # assume camera is placed 90deg against kachaka and sees person up front
                     camera_deg = -90 # camera assumed to always face human
-                    c = 2*math.asin(d_step/(2*z_dist)) # angle to turn
-                    if target_deg+90 < 0:
-                        new_rad = pose_theta - c
-                        dx, dy = get_coords_from_angle(new_rad, d_step)
+                    # get angle to turn by
+                    """
+                    d_step = 2 * z_dist * sin(c/2)
+                    """
+                    target_rad = np.deg2rad(target_deg)
+                    camera_to_target_rad = mod_radians(target_rad+math.pi)-pose_theta
+                    if abs(camera_to_target_rad) < STRAIGHT_FOV_THRE: # looking straight forward to person
+                        self.to_the_front_side = True
+                        d_step = 0
+                        new_pose = None # dont visualize destination
                     else:
-                        new_rad = pose_theta + c
-                        dx, dy = get_coords_from_angle(new_rad, -d_step)
-                    new_pose = (pose_x+dx, pose_y+dy, new_rad) # dont change the direction it ends up facing, for simplicity
-                    self.dest_pose = new_pose
+                        if abs(camera_to_target_rad) < STRAIGHT_FOV_THRE * 2: # adjust fast
+                            d_step = z_dist / (2 * math.cos(camera_to_target_rad))
+                            if d_step > 3: # if step size is too big (in meters) recalculate angle
+                                d_step = z_dist/4
+                                camera_to_target_rad = math.acos(z_dist/(2*d_step))
+                            c = mod_radians(math.pi/2 - (math.pi - camera_to_target_rad)/2)
+                            if target_deg+90 < 0:
+                                new_rad = mod_radians(c + math.pi/2)
+                                dx, dy = get_coords_from_angle(new_rad, d_step)
+                            else:
+                                new_rad = mod_radians(3/2*math.pi + c)
+                                dx, dy = get_coords_from_angle(new_rad, d_step)
+                        else: # TODO: take fixed steps along circumference
+                            d_step = min(z_dist/2, 3) # chord len (dist to travel between 2 vertices on the circumference) in meter
+                            c = 2*math.asin(d_step/(2*z_dist)) # angle to turn
+                            if target_deg+90 < 0:
+                                new_rad = mod_radians(pose_theta - c)
+                                dx, dy = get_coords_from_angle(new_rad, d_step)
+                            else:
+                                new_rad = mod_radians(pose_theta - math.pi + c)
+                                dx, dy = get_coords_from_angle(new_rad, -d_step)
+                        new_pose = (pose_x+dx, pose_y+dy, new_rad)
+                        # self.dest_pose = new_pose
                     
                     # print(f"target_deg:{round(target_deg,1)} | camera_deg:{round(camera_deg,1)} | kachaka_deg:{round(np.rad2deg(pose_theta),1)} | angle_to_turn:{round(np.rad2deg(angle_to_turn),1)}")
                     # visualize
@@ -688,14 +714,14 @@ class KachakaFrame():
             kachaka = get_coords_from_angle(kachaka_theta, z_dist)
             arrow_sca = 40
             ax.add_artist(plt.Circle(center, z_dist/13, color="green", zorder=5, label="human")) # circle center
-            ax.add_artist(plt.Circle(center, z_dist, color="blue", fill=False, linestyle="dashed", zorder=3)) # circumference
-            ax.add_artist(plt.Circle(kachaka, z_dist/13, color="black", zorder=3)) #kachaka obj
+            ax.add_artist(plt.Circle(center, z_dist, color="blue", fill=False, linestyle="dashed", zorder=5)) # circumference
+            ax.add_artist(plt.Circle(kachaka, z_dist/13, color="black", zorder=5)) #kachaka obj
             # kachaka pov
             kachaka_arrow = ax.arrow(kachaka[0], kachaka[1], *get_coords_from_angle(kachaka_theta-math.pi/2, z_dist/2), width=z_dist/arrow_sca, shape="full", color="black", linestyle="", label="Kachaka")
             ax.text(kachaka[0]+z_dist/3, kachaka[1], f"Kachaka:{round(np.rad2deg(kachaka_theta),1)}°", fontsize=12, ha='center', color='black')
             # camera pov
             camera_arrow = ax.arrow(kachaka[0], kachaka[1], *get_coords_from_angle(kachaka_theta-math.pi/2-camera_rads, -z_dist/2), width=z_dist/arrow_sca, shape="full", color="yellow", linestyle="", label="camera")
-            # past target povs
+            # past target lines
             self.visualize_prev_locations.append((0, 0, *get_coords_from_angle(kachaka_theta-math.pi/2+target_rads, -z_dist)))
             if len(self.visualize_prev_locations) > 5:
                 self.visualize_prev_locations.pop(0)
@@ -703,19 +729,26 @@ class KachakaFrame():
                 x,y,dx,dy = n
                 if i == len(self.visualize_prev_locations)-1:
                     # most recent line to be draw with different colour and full alpha
-                    ax.arrow(x, y, dx, dy, color="red", linestyle="solid", lw=1, zorder=4, width=z_dist/arrow_sca, shape="full", label="present human")
+                    ax.arrow(x, y, dx, dy, color="red", linestyle="solid", lw=1, width=z_dist/arrow_sca, shape="full", label="present human")
                 else:
-                    ax.arrow(x, y, dx, dy, color="orange", linestyle="solid", lw=1, zorder=4, alpha=(255/5 * i)/255, width=z_dist/arrow_sca, label=f"[{i}] past human")
-            # kachaka destination
-            pose_x, pose_y, pose_theta = new_pose
-            if target_rads+math.pi/2 < 0:
-                dx, dy = get_coords_from_angle(pose_theta-math.pi/2, step_distance)
-                destination_arrow = ax.arrow(*kachaka, dx, dy, color="purple", linestyle="solid", lw=1, zorder=4, width=z_dist/arrow_sca, shape="full", label="destination", alpha=.5)
-            else:
-                dx, dy = get_coords_from_angle(pose_theta+math.pi/2, -step_distance)
-                destination_arrow = ax.arrow(*kachaka, dx, dy, color="purple", linestyle="solid", lw=1, zorder=4, width=z_dist/arrow_sca, shape="full", label="destination", alpha=.5)
-            ax.add_artist(plt.Circle((kachaka[0]+dx, kachaka[1]+dy), z_dist/15, color="purple", label="newPose"))
-            ax.text(kachaka[0]+z_dist/3, kachaka[1]-z_dist/6, f"To-Face:{round(np.rad2deg(pose_theta),1)}°", fontsize=12, ha='center', color='purple')
+                    ax.arrow(x, y, dx, dy, color="orange", linestyle="solid", lw=1, alpha=(255/5 * i)/255, width=z_dist/arrow_sca, label=f"[{i}] past human")
+            # draw boundary for swapping turn angle calculations
+            x,y = center
+            for c,j in [["blue",1],["blue",2]]:
+                for i in (-1,1):
+                    dx,dy = get_coords_from_angle(i*j*(STRAIGHT_FOV_THRE)+kachaka_theta, z_dist)
+                    ax.plot((x,x+dx), (y,y+dy), color=c, linestyle="dotted", lw=2)
+            # kachaka destination annotations
+            if new_pose is not None:
+                pose_x, pose_y, pose_theta = new_pose
+                if target_rads+math.pi/2 < 0:
+                    dx, dy = get_coords_from_angle(pose_theta-math.pi/2, step_distance)
+                    destination_arrow = ax.arrow(*kachaka, dx, dy, color="purple", linestyle="solid", lw=1, width=z_dist/arrow_sca, shape="full", label="destination", alpha=.5)
+                else:
+                    dx, dy = get_coords_from_angle(pose_theta+math.pi/2, -step_distance)
+                    destination_arrow = ax.arrow(*kachaka, dx, dy, color="purple", linestyle="solid", lw=1, width=z_dist/arrow_sca, shape="full", label="destination", alpha=.5)
+                ax.add_artist(plt.Circle((kachaka[0]+dx, kachaka[1]+dy), z_dist/15, color="purple", label="newPose"))
+                ax.text(kachaka[0]+z_dist/3, kachaka[1]-z_dist/6, f"To-Face:{round(np.rad2deg(pose_theta),1)}°\nz_dist:{round(z_dist,3)}m", fontsize=12, ha='center', color='purple')
             # draw some info text on center
             ax.text(0, z_dist/6, f'Radius = {round(z_dist,5)}\nAngle = {round(np.rad2deg(target_rads),1)}°', fontsize=12, ha='center', color='purple')
             c = 1.2
@@ -1051,8 +1084,11 @@ async def anext(iterator, default=None):
             raise
         return default
 
-def mod_radians(r:float):
-    return r%(math.pi*2)
+def mod_radians(r:float, neg=False):
+    if neg:
+        return (r+math.pi*2)%(math.pi*4) - math.pi*2
+    else:
+        return r%(math.pi*2)
 
 def get_coords_from_angle(theta:float, r:float = 1) -> tuple[float, float]:
     """given hypotenuse and angle, return (x,y) components
