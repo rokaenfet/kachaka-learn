@@ -81,7 +81,7 @@ def log_function_data(func):
         # Format arguments and keyword arguments
         formatted_args = format_value(args)
         formatted_kwargs = format_value(kwargs)
-        logging.info(f'Starting function {func.__name__} with arguments {formatted_args} and keyword arguments {formatted_kwargs}')
+        logging.info(f'Starting function {C.YELLOW}{func.__name__}{C.RESET} with arguments {formatted_args} and keyword arguments {formatted_kwargs}')
         
         try:
             # Call the function and get the result
@@ -89,11 +89,11 @@ def log_function_data(func):
             
             # Format return value
             formatted_result = format_value(result)
-            logging.info(f'Function {func.__name__} returned {formatted_result}')
+            logging.info(f'Function {C.YELLOW}{func.__name__}{C.RESET} returned {formatted_result}')
             return result
         except Exception as e:
             # Log any exceptions that occur
-            logging.error(f'Function {func.__name__} raised an exception: {e}')
+            logging.error(f'Function {C.YELLOW}{func.__name__}{C.RESET} raised an exception: {e}')
             raise
     return wrapper
 
@@ -177,7 +177,6 @@ class RealSenseCamera:
         else:
             return None
 
-    @log_function_data
     def get_frames(self) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
         """
         Wait for the next set of frames and return aligned depth and color images.
@@ -390,11 +389,11 @@ class KachakaFrame():
                     self.running_move_to_pose = False
                     if running_move_to_pose:
                         await self.cancel_move_to_pose()
-                    print("goal reached:", np.round([dest_x, dest_y, dest_theta],3),"-",np.round([cur_x, cur_y, cur_theta],3),"=", np.round(diff,4), "->", np.round(euclidean_dist,4))
+                        logging.debug(f"goal reached:{np.round([dest_x, dest_y, dest_theta],3)}-{np.round([cur_x, cur_y, cur_theta],3)}={np.round(diff,4)}->{np.round(euclidean_dist,4)}")
                 # if goal not reached
                 elif not running_move_to_pose and not self.running_move_to_pose:
                     self.running_move_to_pose = True
-                    print("moving:", np.round([dest_x, dest_y, dest_theta],3),"-",np.round([cur_x, cur_y, cur_theta],3),"=", np.round(diff,4), "->", np.round(euclidean_dist,4))
+                    logging.debug(f"goal reached:{np.round([dest_x, dest_y, dest_theta],3)}-{np.round([cur_x, cur_y, cur_theta],3)}={np.round(diff,4)}->{np.round(euclidean_dist,4)}")
                     await self.short_move_to_pose()
             else:
                 await self.async_client.set_robot_velocity(self.linear, self.angular)
@@ -411,7 +410,6 @@ class KachakaFrame():
         self.cv_img = cv2.imdecode(np.frombuffer(image.data, dtype=np.uint8), flags=1)
         self.cv_img = undistort(self.cv_img, *self.undistort_map)
 
-    @log_function_data
     async def human_detection(self, image:np.ndarray):
         """detects human using kachaka's embedded model
         """
@@ -436,7 +434,6 @@ class KachakaFrame():
             self.target_found = False
             self.human_detection_result = None
 
-    @log_function_data
     async def human_detection_annotate(self, do_draw_box=True, draw_target_marker=True):
         if self.human_detection_result:
             if do_draw_box:
@@ -499,7 +496,6 @@ class KachakaFrame():
         else:
             self.being_controlled = False
 
-    @log_function_data
     async def annotate(self, st:float, show_fps = False, show_nearest_lidar = False, show_id = True):
         if show_fps:
             cv2.putText(self.cv_img, f"fps:{round(1/(time.time()-st))}", (20, 80), *lazy_cv2_txt_params)
@@ -536,7 +532,7 @@ class KachakaFrame():
                 else:
                     print(self.error_code[result.error_code])
         except Exception as e:
-            print(self.id,":",e)
+            logging.error(f"[{self.id}]{C.RED}Fail{C.RESET} during short_navigate(): {e}")
 
     @log_function_data
     async def check_navigate(self):
@@ -555,7 +551,7 @@ class KachakaFrame():
             # when function ends
             self.running_move_to_pose = False
         else:
-            print(f"{C.RED}Fail{C.RESET} during move_to_pose(): {self.error_code[result.error_code]}")
+            logging.error(f"[{self.id}]{C.RED}Fail{C.RESET} during move_to_pose(): {self.error_code[result.error_code]}")
 
     @log_function_data
     async def check_move_to_pose(self):
@@ -572,7 +568,6 @@ class KachakaFrame():
         if await self.check_move_to_pose():
             await self.async_client.cancel_command()
 
-    @log_function_data
     async def check_command_states(self) -> tuple:
         """
         Return -> bool, [pb2.GetCommandStateResponse, None], (Result, Command)
@@ -612,7 +607,6 @@ class KachakaFrame():
         deg = sign*rads*180/np.pi
         return deg
 
-    @log_function_data
     async def mp_landmark_annotate(self, line_length=100):
         m = self.mp_landmark_model
         # draw if, human detected, landmarks found, and if these 2 overlap
@@ -633,7 +627,6 @@ class KachakaFrame():
         x,y,w,h = self.target_pos
         return x<=tx<=x+w and y<=ty<=y+h
 
-    @log_function_data
     async def get_robot_pose(self):
         """
         return:
@@ -663,8 +656,9 @@ class KachakaFrame():
                 l = [m._convert_to_ndarray(i) for i in l]
                 l = [self.realsense.get_depth_at_pixel(int(img_w*x), int(img_h*y), self.depth_image, self.color_image) for x,y,_ in l]
                 l = filter_outliers_IQR(np.array([n for n in l if n is not None],dtype=float))
-                if len(l) > 5: # continue only if valid depths can be retrieved
+                if len(l) > 10: # continue only if valid depths can be retrieved
                     z_dist = np.average(l) # distance in meter
+                    logging.debug(f"[{self.id}]KachakaFrame.adjust_to_front(). z_dist:{z_dist}, l:{len(l)}/33")
                     d_step = min(z_dist/4, 1) # chord len (dist to travel between 2 vertices on the circumference) in meter
                     (pose_x, pose_y), pose_theta  = await pose_task
                     pose_deg = np.rad2deg(pose_theta)
@@ -718,7 +712,7 @@ class KachakaFrame():
                 dx, dy = get_coords_from_angle(pose_theta-math.pi/2, step_distance)
                 destination_arrow = ax.arrow(*kachaka, dx, dy, color="purple", linestyle="solid", lw=1, zorder=4, width=z_dist/arrow_sca, shape="full", label="destination", alpha=.5)
             else:
-                dx, dy = get_coords_from_angle(pose_theta-math.pi/2, -step_distance)
+                dx, dy = get_coords_from_angle(pose_theta+math.pi/2, -step_distance)
                 destination_arrow = ax.arrow(*kachaka, dx, dy, color="purple", linestyle="solid", lw=1, zorder=4, width=z_dist/arrow_sca, shape="full", label="destination", alpha=.5)
             ax.add_artist(plt.Circle((kachaka[0]+dx, kachaka[1]+dy), z_dist/15, color="purple", label="newPose"))
             ax.text(kachaka[0]+z_dist/3, kachaka[1]-z_dist/6, f"To-Face:{round(np.rad2deg(pose_theta),1)}°", fontsize=12, ha='center', color='purple')
@@ -949,7 +943,6 @@ def image_resize(image, width = None, height = None, inter = cv2.INTER_AREA):
     # return the resized image
     return resized
 
-@log_function_data
 async def display_kachakas(kachakas:list[KachakaFrame]):
     image = np.concatenate(([kachaka.cv_img for kachaka in kachakas]), axis=1)
     image = image_resize(image, width=SCREEN_W, height=SCREEN_H)

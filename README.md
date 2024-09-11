@@ -53,7 +53,8 @@ think-pad pass:1234
   - [x] MP pose landmark > orientation for *full body*
   - [ ] circle around target in fixed distance till face can be seen
     - [x] circle angle calculation
-    - [ ] circle step calculation
+    - [x] circle step calculation
+    - [ ] stop when on the front side of person
   - [ ] adjust distance to target s.t. face can be seen
 - [ ] move kachaka and external devices with mounted laptop
   - [x] kachaka
