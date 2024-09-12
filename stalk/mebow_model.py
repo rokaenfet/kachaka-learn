@@ -89,7 +89,7 @@ class MEBOWFrame():
 
         self.model = get_pose_net(cfg, is_train=False).to(args.device)
 
-        print(f"\033[32mSuccessfully\033[0m imported stalk/models/model_hboe.pth")
+        # print(f"\033[32mSuccessfully\033[0m imported stalk/models/model_hboe.pth")
         self.model.load_state_dict(torch.load("stalk/models/model_hboe.pth", map_location=torch.device(args.device)), strict=True)
 
         # Data loading code

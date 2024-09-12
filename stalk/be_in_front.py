@@ -7,8 +7,8 @@ warnings.filterwarnings("ignore")
 from funcs import *
 
 KACHAKA_IPS = {
-    # 0:"192.168.118.158:26400",
-    1:"192.168.118.163:26400",
+    0:"192.168.118.158:26400",
+    # 1:"192.168.118.163:26400",
     # 2:"192.168.118.77:26400"
     }
 
@@ -30,13 +30,15 @@ async def detection_process(kachaka: KachakaFrame):
         await kachaka.human_detection(kachaka.cv_img)
         await asyncio.gather(
             kachaka.face_detector.process(kachaka.cv_img),
-            kachaka.mp_landmark_model.process(kachaka.cv_img)
+            kachaka.mp_landmark_model.process(kachaka.cv_img),
+            # kachaka.mebow_model.process(kachaka.cv_img)
             )
 
         # Annotation task
         await asyncio.gather(
             kachaka.annotate(st, show_fps=True, show_nearest_lidar=False, show_id=True), # base fps, lidar_dist, id
             kachaka.human_detection_annotate(), # annotate human bounding box
+            # kachaka.mebow_annotate(),
             kachaka.mp_landmark_annotate(), # annotate HOE
             )
     else:

@@ -120,7 +120,7 @@ think-pad pass:1234
 
 - **Monocular Estimation of Body Orientation in the Wild**
   - [repo](https://github.com/ChenyanWu/MEBOW)
-  - Works well camera captures whole body, except when facing away (angle prediction oscillates aggressively), otherwise unusable
+  - Works when camera captures whole body, except when facing away (angle prediction oscillates aggressively)
 - **Partial-Human Orientation Estimation**
   - [repo](https://github.com/zhaojieting/Part_HOE)
   - [paper](https://arxiv.org/pdf/2404.14139)
@@ -132,6 +132,12 @@ think-pad pass:1234
 - **MP Pose**
   - [web](https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker/python)
   - only works with full body
+- **Alpha Pose**
+  - [web](https://github.com/MVIG-SJTU/AlphaPose/blob/master/docs/INSTALL.md)
+  - too slow
+- **FastPose**
+  - [web](https://github.com/ZexinChen/FastPose?tab=readme-ov-file)
+  - too slow
 
 ---
 
