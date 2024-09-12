@@ -326,6 +326,7 @@ class KachakaFrame():
 
         # var for visualization
         self.visualize_prev_locations = []
+        self.graph_i = 0
         logging.info(f"KachakaFrame.__init__() done")
 
     @log_function_data
@@ -757,6 +758,9 @@ class KachakaFrame():
             ax.axis("off")
             ax.legend()
             fig.savefig("stalk/visualize.png", bbox_inches="tight")
+            # save frame by frame
+            fig.savefig(f"stalk/img/graph_{str(self.graph_i).zfill(3)}.png")
+            self.graph_i += 1
 
 class FaceDetect():
     def __init__(self):
@@ -1113,6 +1117,18 @@ def filter_outliers_IQR(data: np.ndarray) -> np.ndarray:
 
     # Filter data
     return data[(data >= lower_bound) & (data <= upper_bound)]
+
+def dir_to_gif():
+    import os
+    from PIL import Image
+    dir = "/home/yo/Desktop/kachaka/kachaka-learn/stalk/img/"
+    images = [f for f in os.listdir(dir) if f.endswith(".png")]
+    images = [Image.open(os.path.join(dir,f)) for f in images]
+    images[0].save('output.gif',
+               save_all=True,  # Save all frames
+               append_images=images[1:],  # Append the rest of the images
+               duration=500,  # Duration between frames in milliseconds
+               loop=0)  # Loop forever
 
 class C:
     RED = "\033[31m"
