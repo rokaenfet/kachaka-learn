@@ -18,7 +18,6 @@ from scipy import stats
 
 from mebow_model import MEBOWFrame
 from ultralytics import YOLO
-from fastpose import FastPose 
 import pyrealsense2 as rs
 import ultralytics
 from typing import Tuple, Optional, Dict
@@ -661,58 +660,68 @@ class KachakaFrame():
             if self.dest_pose is None:
                 pose_task = asyncio.create_task(self.get_robot_pose())
                 # get distance to target user
-                target_deg = np.rad2deg(mod_radians(np.deg2rad(self._find_deg_from_landmarks()-180))) # fix for world
+                target_deg = self._find_deg_from_landmarks() - 90
                 """DEPRECATED: find relative z_dist using landmarks from HOE"""
                 # z_dist = m.get_distance_to_hip()
                 # z_dist = m.get_distance_to_shoulder()
                 """find global z_dist from depth sensor"""
-                # l = [MPLandmark.NOSE, MPLandmark.LEFT_SHOULDER, MPLandmark.RIGHT_SHOULDER, MPLandmark.LEFT_EYE, 
-                #                 MPLandmark.RIGHT_EYE, MPLandmark.LEFT_HIP, MPLandmark.RIGHT_HIP]
-                l = [i for i in range(33)] # search from every available landmark (max 33)
+                l = [MPLandmark.NOSE, MPLandmark.LEFT_SHOULDER, MPLandmark.RIGHT_SHOULDER, MPLandmark.LEFT_EYE, 
+                                MPLandmark.RIGHT_EYE, MPLandmark.LEFT_HIP, MPLandmark.RIGHT_HIP]
+                # l = [i for i in range(33)] # search from every available landmark (max 33)
                 l = [m._convert_to_ndarray(i) for i in l]
                 l = [self.realsense.get_depth_at_pixel(int(img_w*x), int(img_h*y), self.depth_image, self.color_image) for x,y,_ in l]
                 l = filter_outliers_IQR(np.array([n for n in l if n is not None],dtype=float))
-                if len(l) > 10: # continue only if valid depths can be retrieved
+                if len(l) > 4: # continue only if valid depths can be retrieved
                     z_dist = np.average(l) # distance in meter
                     logging.debug(f"[{self.id}]KachakaFrame.adjust_to_front(). z_dist:{z_dist}, l:{len(l)}/33")
                     (pose_x, pose_y), pose_theta  = await pose_task
+                    pose_theta -= math.pi/2
                     pose_deg = np.rad2deg(pose_theta)
                     # TODO: angular offset in the x-axis between kachaka and camera, will be determined with robot arm later
                     camera_deg = 90 # camera fixed atm
                     # get angle to turn by; angle is 0 from vertical line's bottom half and is positive clockwise
-                    pose_theta -= math.pi/2
-                    target_rad = np.deg2rad(target_deg) # angle to target's orientation
+                    target_rad = np.deg2rad(target_deg) + pose_theta # angle to target's orientation
                     kachaka_look_rad = mod_radians(pose_theta - math.pi/2)
                     camera_look_rad = mod_radians(kachaka_look_rad - np.deg2rad(camera_deg)) # angle which camera is looking
                     camera_target_diff = mod_radians(camera_look_rad - target_rad - math.pi) # angle difference between camera and target
-                    print(f"mod_radians({np.rad2deg(camera_look_rad)} - {np.rad2deg(target_rad)}) = {np.rad2deg(camera_target_diff)}")
-                    if camera_target_diff < STRAIGHT_FOV_THRE or math.pi*2-camera_target_diff < STRAIGHT_FOV_THRE: # looking straight forward to person
-                        self.to_the_front_side = True
-                        d_step = 0
-                        new_rad = 0
-                        dx, dy = 0, 0
-                        new_pose = None # dont visualize destination
-                    else:
-                        if camera_target_diff < STRAIGHT_FOV_THRE * 3  or math.pi*2-camera_target_diff < STRAIGHT_FOV_THRE * 3: # adjust fast
+                    # print(f"mod_radians({np.rad2deg(camera_look_rad)} - {np.rad2deg(target_rad)}) = {np.rad2deg(camera_target_diff)}")
+                    # check if person is facing towards the camera
+                    if m.facing_camera():
+                        if camera_target_diff < STRAIGHT_FOV_THRE or math.pi*2-camera_target_diff < STRAIGHT_FOV_THRE: # looking straight forward to person
+                            self.to_the_front_side = True
+                            d_step = 0
+                            new_rad = 0
+                            dx, dy = 0, 0
+                            new_pose = None # dont move to destination
+                            self.speak("yes")
+                        else:
+                            # if camera_target_diff < STRAIGHT_FOV_THRE * 2  or math.pi*2-camera_target_diff < STRAIGHT_FOV_THRE * 3: # adjust fast
                             d_step = z_dist / (2 * math.cos(camera_target_diff))
-                            if d_step > 2: # if step size is too big (in meters) recalculate angle
-                                d_step = 2
-                                new_rad = math.acos(z_dist/(2*d_step))
-                            else:
-                                new_rad = mod_radians(camera_look_rad + math.pi + (math.pi - camera_target_diff)/2)
+                            new_rad = mod_radians(kachaka_look_rad + (math.pi - camera_target_diff)/2)
                             dx, dy = get_coords_from_angle(new_rad, d_step)
-                        else: # TODO: take fixed steps along circumference
-                            d_step = min(z_dist/2, 3) # chord len (dist to travel between 2 vertices on the circumference) in meter
-                            new_rad = 2*math.asin(2*d_step/z_dist) # angle to turn
-                            # print("2nd", c)
-                            dx, dy = get_coords_from_angle(new_rad, d_step)
+                            # else: # TODO: take fixed steps along circumference
+                            #     d_step = z_dist/2 # chord len (dist to travel between 2 vertices on the circumference) in meter
+                            #     new_rad = kachaka_look_rad + 2*math.asin(2*d_step/z_dist) # angle to turn
+                            #     dx, dy = get_coords_from_angle(new_rad, d_step)
+                            new_pose = (pose_x+dx, pose_y+dy, new_rad)
+                    else:
+                        # TODO: step movement in a preset direction
+                        # if person is facing away, simply traverse along circumference in random dir
+                        d_step = z_dist / (2 * math.cos(camera_target_diff))
+                        if d_step > 3:
+                            d_step = 3
+                            camera_target_diff = math.acos(z_dist / (2 * d_step))
+                        new_rad = mod_radians(kachaka_look_rad + (math.pi - math.pi/6)/2)
+                        dx, dy = get_coords_from_angle(new_rad, d_step)
                         new_pose = (pose_x+dx, pose_y+dy, new_rad)
-                        # self.dest_pose = new_pose
-                    
+
+                    # assign calculated destination to be moved to
+                    # self.dest_pose = new_pose
+
                     # print(f"target_deg:{round(target_deg,1)} | camera_deg:{round(camera_deg,1)} | kachaka_deg:{round(np.rad2deg(pose_theta),1)} | angle_to_turn:{round(np.rad2deg(angle_to_turn),1)}")
                     # visualize
                     await self._visualize_adjusting_to_front(z_dist, target_rad, camera_look_rad, d_step, new_pose, pose_theta, kachaka_look_rad)
-            
+
     async def _visualize_adjusting_to_front(self, z_dist, target_rads, camera_look_rad, step_distance, new_pose, kachaka_theta, kachaka_look_rad): # assumes camera is facing towards target
         m = self.mp_landmark_model
         if m.result.pose_landmarks:
@@ -743,7 +752,7 @@ class KachakaFrame():
                     ax.text(x+dx, y+dy-z_dist/10, f"{round(np.rad2deg(n),1)}", fontsize=12, ha='center', color='orange', zorder=5)
             # draw boundary for swapping turn angle calculations
             x,y = center
-            for c,j in [["red",1],["blue",3]]:
+            for c,j in [["red",1],["blue",2]]:
                 for i in (-1,1):
                     dx,dy = get_coords_from_angle(i*j*(STRAIGHT_FOV_THRE)+kachaka_theta, z_dist)
                     ax.plot((x,x+dx), (y,y+dy), color=c, linestyle="dotted", lw=2)
@@ -950,9 +959,12 @@ class MPLandmark():
         returns True if the person is facing the camera
         """
         # check if person if facing towards or away from camera
-        l_shoulder = self._convert_to_ndarray(MPLandmark.LEFT_SHOULDER)
-        r_shoulder = self._convert_to_ndarray(MPLandmark.RIGHT_SHOULDER)
-        nose = self._convert_to_ndarray(MPLandmark.NOSE)
+        try:
+            l_shoulder = self._convert_to_ndarray(MPLandmark.LEFT_SHOULDER)
+            r_shoulder = self._convert_to_ndarray(MPLandmark.RIGHT_SHOULDER)
+            nose = self._convert_to_ndarray(MPLandmark.NOSE)
+        except:
+            return False
         shoulder_mid = (l_shoulder+r_shoulder)/2
         d = nose-shoulder_mid
         return np.sign(d[2]) == -1
@@ -1079,6 +1091,7 @@ async def object_monitor_key_press(kachakas:list[KachakaFrame]):
             print("Key 'q' pressed. Terminating all tasks...")
             for kachaka in kachakas:
                 kachaka.run = False
+            dir_to_gif()
             break
         elif key.lower() == 'h':
             print("Key 'h' pressed. Returning to home...")
@@ -1134,6 +1147,7 @@ def dir_to_gif():
     from PIL import Image
     dir = "/home/yo/Desktop/kachaka/kachaka-learn/stalk/img/"
     images = [f for f in os.listdir(dir) if f.endswith(".png")]
+    images.sort()
     images = [Image.open(os.path.join(dir,f)) for f in images]
     images[0].save('output.gif',
                save_all=True,  # Save all frames
