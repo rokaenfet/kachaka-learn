@@ -18,34 +18,6 @@ SEARCH_COOLDOWN = 20 # cooldown between locking onto 2 instances of detected hum
 DURATION_FOR_CANCEL_NAV = 3 # duration until navigation is turned off when human is detected
 WINDOW_NAME = "full"
 
-async def detection_process(kachaka: KachakaFrame):
-    st = time.time()
-    # load frames
-    depth_image, color_image = kachaka.realsense.get_frames()
-    if depth_image is not None and color_image is not None:
-        kachaka.cv_img = color_image.copy()
-        kachaka.color_image = color_image
-        kachaka.depth_image = depth_image
-        # detection task
-        await kachaka.human_detection(kachaka.cv_img)
-        await asyncio.gather(
-            kachaka.face_detector.process(kachaka.cv_img),
-            kachaka.mp_landmark_model.process(kachaka.cv_img),
-            # kachaka.mebow_model.process(kachaka.cv_img)
-            )
-
-        # Annotation task
-        await asyncio.gather(
-            kachaka.annotate(st, show_fps=True, show_nearest_lidar=False, show_id=True), # base fps, lidar_dist, id
-            kachaka.human_detection_annotate(), # annotate human bounding box
-            # kachaka.mebow_annotate(),
-            kachaka.mp_landmark_annotate(), # annotate HOE
-            )
-    else:
-        kachaka.cv_img = None
-        kachaka.color_image = None
-        kachaka.depth_image = None
-
 async def controller(kachakas:list[KachakaFrame]):
     """
     asynchronously runs navigation on each kachaka and detection_tasks then displays
@@ -55,11 +27,18 @@ async def controller(kachakas:list[KachakaFrame]):
     # main loop
     while any([kachaka.run for kachaka in kachakas]):
         mover_tasks = [asyncio.create_task(kachaka.move()) for kachaka in kachakas]
-        await asyncio.gather(
-            *[detection_process(kachaka) for kachaka in kachakas],
-            *[kachaka.circle() for kachaka in kachakas]
-        )
         # display
+        for kachaka in kachakas:
+            depth_image, color_image = kachaka.realsense.get_frames()
+            if depth_image is not None and color_image is not None:
+                kachaka.cv_img = color_image.copy()
+                kachaka.color_image = color_image
+                kachaka.depth_image = depth_image
+            else:
+                kachaka.cv_img = kachaka.color_image = kachaka.depth_image = None
+        await asyncio.gather(
+            *[kachaka.test_circle() for kachaka in kachakas]
+        )
         if all([kachaka.cv_img is not None for kachaka in kachakas]):
             cv2.imshow(WINDOW_NAME, await display_kachakas(kachakas))
         cv2.waitKey(1)
