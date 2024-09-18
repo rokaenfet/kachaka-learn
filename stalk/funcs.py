@@ -757,20 +757,20 @@ class KachakaFrame():
 
     async def test_circle(self):
         if self.dest_pose is None:
-            target_rad = np.deg2rad(45)
+            target_rad = np.deg2rad(-30)
             z_dist = 0.3 #meter
             (pose_x, pose_y), pose_theta = await self.get_robot_pose() # pose_theta is in range [-pi, pi]
             camera_rad = math.pi/2
             kachaka_look_rad = pose_theta + math.pi/2
             camera_look_rad = kachaka_look_rad + camera_rad
-            target_rad += pose_theta - math.pi/2
+            target_rad += pose_theta
             # make pose coords to relative coords
             # get human world coordinate by using BOTH camera and human orientation
             human_x, human_y = pose_x+z_dist*math.cos(camera_look_rad), pose_y+z_dist*math.sin(camera_look_rad)
             rel_pose_x, rel_pose_y = pose_x - human_x, pose_y - human_y
             rel_theta = math.atan2(rel_pose_y, rel_pose_x)
             # get theta_diff
-            d_theta = math.pi + (target_rad - camera_look_rad)
+            d_theta = math.pi/2 + (target_rad - camera_look_rad)
             # get new coords
             step_theta = np.sign(d_theta)*min(math.pi/4, abs(d_theta))
             new_theta = rel_theta + step_theta + math.pi/2
@@ -1351,7 +1351,7 @@ async def object_monitor_key_press(kachakas:list[KachakaFrame]):
             print("Key 'q' pressed. Terminating all tasks...")
             for kachaka in kachakas:
                 kachaka.run = False
-            dir_to_gif()
+            # dir_to_gif()
             break
         elif key.lower() == 'h':
             print("Key 'h' pressed. Returning to home...")
