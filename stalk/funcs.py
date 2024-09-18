@@ -757,7 +757,7 @@ class KachakaFrame():
 
     async def test_circle(self):
         if self.dest_pose is None:
-            target_rad = np.deg2rad(180)
+            target_rad = np.deg2rad(45)
             z_dist = 0.3 #meter
             (pose_x, pose_y), pose_theta = await self.get_robot_pose() # pose_theta is in range [-pi, pi]
             camera_rad = math.pi/2
@@ -773,14 +773,13 @@ class KachakaFrame():
             d_theta = math.pi + (target_rad - camera_look_rad)
             # get new coords
             step_theta = np.sign(d_theta)*min(math.pi/4, abs(d_theta))
-            new_theta = rel_theta + step_theta
+            new_theta = rel_theta + step_theta + math.pi/2
             rel_new_x, rel_new_y = get_coords_from_angle(new_theta, z_dist)
             # print((rel_pose_x, rel_pose_y), (rel_new_x, rel_new_y))
             new_x, new_y = human_x - rel_new_x, human_y - rel_new_y
             # print((pose_x, pose_y), (new_x, new_y))
             # self.dest_pose = (pose_x, pose_y, new_theta)
-            self.dest_pose = (new_x, new_y, 0)
-            print((pose_x, pose_y), (human_x, human_y), (rel_pose_x, rel_pose_y), (rel_new_x, rel_new_y), (new_x, new_y))
+            self.dest_pose = (new_x, new_y, kachaka_look_rad + step_theta)
 
             # visualize
             fig,ax = plt.subplots(figsize=(12,8))
@@ -1404,15 +1403,18 @@ def filter_outliers_IQR(data: np.ndarray) -> np.ndarray:
 def dir_to_gif():
     import os
     from PIL import Image
-    dir = "/home/yo/Desktop/kachaka/kachaka-learn/stalk/img/"
-    images = [f for f in os.listdir(dir) if f.endswith(".png")]
-    images.sort()
-    images = [Image.open(os.path.join(dir,f)) for f in images]
-    images[0].save('output.gif',
-               save_all=True,  # Save all frames
-               append_images=images[1:],  # Append the rest of the images
-               duration=500,  # Duration between frames in milliseconds
-               loop=0)  # Loop forever
+    try:
+        dir = "/home/yo/Desktop/kachaka/kachaka-learn/stalk/img/"
+        images = [f for f in os.listdir(dir) if f.endswith(".png")]
+        images.sort()
+        images = [Image.open(os.path.join(dir,f)) for f in images]
+        images[0].save('output.gif',
+                save_all=True,  # Save all frames
+                append_images=images[1:],  # Append the rest of the images
+                duration=500,  # Duration between frames in milliseconds
+                loop=0)  # Loop forever
+    except Exception as e:
+        logging.error(e)
 
 class C:
     RED = "\033[31m"
