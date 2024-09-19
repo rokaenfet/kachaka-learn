@@ -38,6 +38,12 @@ think-pad pass:1234
 
 ---
 
+# Angle logic
+
+![](asset/math2.jpg)
+
+---
+
 # TODO
 - [x] learn kachaka
 - [x] teleop with live cam and lidar display

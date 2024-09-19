@@ -758,10 +758,12 @@ class KachakaFrame():
                     await self._visualize_adjusting_to_front(z_dist, target_rad, camera_look_rad, d_step, new_pose, pose_theta, kachaka_look_rad)
 
     async def circle(self):
+        def d(r): return np.rad2deg(r)
         m = self.mp_landmark_model
         img_h, img_w, _ = self.color_image.shape
         if self.target_found and m.landmarks is not None and self.dest_pose is None:
-            target_rad = 2*PI-np.deg2rad(self._find_deg_from_landmarks())
+            target_rad = PI/2+2*PI-d(self._find_deg_from_landmarks())
+            target_rad = PI/2+2*PI-d(30)
             # target_rad = -PI
             l = [MPLandmark.NOSE, MPLandmark.LEFT_SHOULDER, MPLandmark.RIGHT_SHOULDER]
             l = [m._convert_to_ndarray(i) for i in l]
@@ -769,29 +771,29 @@ class KachakaFrame():
             l = filter_outliers_IQR(np.array([n for n in l if n is not None],dtype=float))
             if len(l) == 3: # continue only if valid depths can be retrieved
                 z_dist = np.average(l) # distance in meter
-                if z_dist < 2: # anything larger is too far
+                if z_dist < 3: # anything larger is too far
                     logging.debug(f"[{self.id}]KachakaFrame.circle(). z_dist:{z_dist}")
                     (pose_x, pose_y), pose_theta = await self.get_robot_pose() # pose_theta is in range [-pi, pi]
                     pose = np.array([pose_x, pose_y])
                     camera_rad = PI/2 # kachaka to camera yaw offset
                     kachaka_look_rad = pose_theta + PI/2 # angle kachaka is looking
                     camera_look_rad = kachaka_look_rad + camera_rad # direction of camera
-                    target_rad = target_rad + pose_theta # target angle
+                    target_rad = normalize_radians(target_rad + pose_theta) # target angle
                     # get human world coordinate by using BOTH camera and human orientation
                     human = pose + get_coords_from_angle(camera_look_rad, z_dist)
                     # get relative coords
-                    rel_pose = pose - human
+                    rel_pose = get_coords_from_angle(PI + camera_look_rad, z_dist)
                     # get theta_diff
-                    d_theta = (target_rad - camera_look_rad + np.pi) % (2 * np.pi) - np.pi
-                    print("pose",pose_theta, "target",target_rad, "camera",camera_look_rad, "d_theta",d_theta)
+                    d_theta = normalize_radians(target_rad - (camera_look_rad + PI))
+                    print("pose",d(pose_theta), "target",d(target_rad), "camera",d(camera_look_rad), "d_theta",d(d_theta))
                     # get new coords
                     step_theta = np.sign(d_theta)*min(PI/4, abs(d_theta))
-                    new_theta = camera_look_rad + step_theta
-                    print("new_theta",new_theta)
+                    new_theta = pose_theta + step_theta
+                    print("new_theta",d(new_theta))
                     rel_new = get_coords_from_angle(new_theta, z_dist)
-                    new = human + rel_new
-                    # print((pose_x, pose_y), (new_x, new_y))
-                    # self.dest_pose = (*new, normalize_radians(new_theta + camera_rad))
+                    new = pose + rel_new
+                    # calculate the next angle to look (perpendicular to tangent to circumference at this new point)
+                    self.dest_pose = (*new, np.arctan2(new[0],new[1]) - PI)
 
                     # visualize
                     fig,ax = plt.subplots(figsize=(12,8))
