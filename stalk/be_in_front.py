@@ -7,8 +7,8 @@ warnings.filterwarnings("ignore")
 from funcs import *
 
 KACHAKA_IPS = {
-    0:"192.168.118.168:26400",
-    # 1:"192.168.118.166:26400",
+    # 0:"192.168.118.168:26400",
+    1:"192.168.118.166:26400",
     # 2:"192.168.118.160:26400"
     }
 
@@ -57,6 +57,8 @@ async def controller(kachakas:list[KachakaFrame]):
         mover_tasks = [asyncio.create_task(kachaka.move()) for kachaka in kachakas]
         await asyncio.gather(
             *[detection_process(kachaka) for kachaka in kachakas],
+            *[kachaka.get_dist_to_target() for kachaka in kachakas],
+            *[kachaka.adjust() for kachaka in kachakas],
             *[kachaka.circle() for kachaka in kachakas]
         )
         # display

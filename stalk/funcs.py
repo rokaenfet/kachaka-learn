@@ -44,8 +44,6 @@ AUTO_LINEAR_SPEED = 1
 ANGULAR_SPEED = 1
 AUTO_ANGULAR_SPEED = .8
 EMERGENCY_STOP_DISTANCE = 0.2
-WIN_W = 1280
-WIN_H = 720
 THRE = 30
 YOLO_CONF_THRE = 0.85
 lazy_cv2_txt_params = (FONT, 3, GREEN, 3)
@@ -57,18 +55,12 @@ MOVE_ANGLE_THRE = 0.03
 MOVE_EUCLIDEAN_DIST_THRE = 0.03
 STRAIGHT_FOV_THRE = PI/16 # rads
 MAX_D_STEP = 3 # meter
-
-# SCREEN_NAME = "Fullscreen"
-# cv2.namedWindow(SCREEN_NAME, cv2.WINDOW_NORMAL)
-# cv2.setWindowProperty(SCREEN_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-# SCREEN_W, SCREEN_H = cv2.getWindowImageRect(SCREEN_NAME)[2:4]
-# cv2.destroyWindow(SCREEN_NAME)
-SCREEN_W, SCREEN_H = 640, 480
+SCREEN_W, SCREEN_H = 1280, 720
 
 # log
 logging.basicConfig(
     filename='stalk/app.log',          # The name of the log file
-    level=logging.INFO,         # The minimum level of log messages to handle
+    level=logging.DEBUG,         # The minimum level of log messages to handle
     format='%(asctime)s - %(levelname)s - %(message)s',  # The format of log messages
     datefmt='%Y-%m-%d %H:%M:%S',  # The format for the date/time
     filemode="w"    
@@ -131,7 +123,6 @@ def log_function_data(func):
     else:
         return sync_wrapper
 
-
 class RealSenseCamera:
     def __init__(self, depth_width: int = 1280, depth_height: int = 720, 
                  rgb_width: int = 1920, rgb_height: int = 1080, depth_fps: int = 30, rgb_fps: int = 30) -> None:
@@ -167,6 +158,8 @@ class RealSenseCamera:
         self.config: rs.config = rs.config()
         self.config.enable_stream(rs.stream.depth, depth_width, depth_height, rs.format.z16, depth_fps)
         self.config.enable_stream(rs.stream.color, rgb_width, rgb_height, rs.format.bgr8, rgb_fps)
+        self.config.enable_stream(rs.stream.gyro)
+        self.config.enable_stream(rs.stream.accel)
         
         # Start pipeline
         self.profile = self.pipeline.start(self.config)
@@ -182,6 +175,9 @@ class RealSenseCamera:
         self.spatial_filter = rs.spatial_filter()
         self.temporal_filter = rs.temporal_filter()
         self.disparity_to_depth = rs.disparity_transform(False)
+
+        # for orientation
+        self.prev_angles = {"pitch":0, "roll":0, "yaw":0, "time":time.time()} # assumes it starts at orientation(0,0,0)
 
     def get_depth_scale(self) -> float:
         """
@@ -231,6 +227,54 @@ class RealSenseCamera:
         depth_image: np.ndarray = np.asanyarray(depth_frame.get_data())
         color_image: np.ndarray = np.asanyarray(color_frame.get_data())
         return depth_image, color_image
+    
+    def get_orientation(self) -> tuple[float, float, float]:
+        """Estimate pitch, roll, yaw from D435i camera IMU
+
+        return:
+            tuple:
+                yaw[float]
+
+                pitch[float]
+
+                roll[float]
+        """
+        frames = self.pipeline.wait_for_frames()
+        gyro_frame = frames.first_or_default(rs.stream.gyro)
+        accel_frame = frames.first_or_default(rs.stream.accel)
+        if gyro_frame and accel_frame:
+            gyro_data = gyro_frame.as_motion_frame().get_motion_data()
+            accel_data = accel_frame.as_motion_frame().get_motion_data() 
+            # print(f"Gyro: [{gyro_data.x}, {gyro_data.y}, {gyro_data.z}]")
+            # print(f"Accel: [{accel_data.x}, {accel_data.y}, {accel_data.z}]")   
+            alpha = 0.98  # Complementary filter coefficient (tweak this value)
+
+            # Extract accelerometer and gyroscope data
+            ax, ay, az = accel_data.x, accel_data.y, accel_data.z
+            gx, gy, gz = gyro_data.x, gyro_data.y, gyro_data.z
+
+            # Compute pitch and roll from accelerometer (in radians)
+            pitch_accel = np.arctan2(-ax, np.sqrt(ay**2 + az**2))
+            roll_accel = np.arctan2(ay, az)
+            
+            # Integrate gyroscope data to get angular change
+            ct = time.time()
+            dt = ct - self.prev_angles["time"]
+            pitch_gyro = self.prev_angles['pitch'] + gx * dt
+            roll_gyro = self.prev_angles['roll'] + gy * dt
+            yaw_gyro = self.prev_angles['yaw'] + gz * dt
+
+            # Apply complementary filter to combine accelerometer and gyroscope
+            pitch = alpha * pitch_gyro + (1 - alpha) * pitch_accel
+            roll = alpha * roll_gyro + (1 - alpha) * roll_accel
+            yaw = yaw_gyro  # Yaw cannot be corrected by accelerometer; rely on gyro
+
+            self.prev_angles["time"] = ct
+            self.prev_angles["pitch"] = pitch
+            self.prev_angles["roll"] = roll
+            self.prev_angles["yaw"] = yaw
+
+            return yaw, pitch, roll
 
     def apply_post_processing(self, depth_frame: rs.frame) -> rs.frame:
         """
@@ -336,11 +380,11 @@ class KachakaFrame():
 
         # load realsense camera
         self.realsense = RealSenseCamera(
-            depth_width=1280,
-            depth_height=720,
+            depth_width=SCREEN_W,
+            depth_height=SCREEN_H,
             depth_fps=30,
-            rgb_width=1280,
-            rgb_height=720,
+            rgb_width=SCREEN_W,
+            rgb_height=SCREEN_H,
             rgb_fps=30,
         )
         self.color_image = None
@@ -355,11 +399,14 @@ class KachakaFrame():
 
         # vars for move_to_pos
         self.running_move_to_pose = False
-        self.move_try_count = 0
+        self.move_try_timer = 0
+        self.to_adjust = True
+        self.z_dist = None
 
         # var for visualization
         self.visualize_prev_locations = []
         self.graph_i = 0
+        self.consecutive_z_dists = []
         directory = os.path.join(os.getcwd(),"stalk/img")
         png_files = glob.glob(os.path.join(directory, '*.png'))
 
@@ -427,30 +474,32 @@ class KachakaFrame():
             (cur_x, cur_y), cur_theta = await self.get_robot_pose()
             # if destination pose is defined and move_to_pose is currently not running, then run move_to_pose()
             if self.dest_pose is not None:
+                if self.move_try_timer == 0:
+                    self.move_try_timer = time.time()
                 dest_x, dest_y, dest_theta = self.dest_pose
                 dest_theta = mod_radians(dest_theta)
                 cur_theta = mod_radians(cur_theta)
                 diff = np.array([cur_x, cur_y, cur_theta])-np.array([dest_x, dest_y, dest_theta])
                 euclidean_dist = np.linalg.norm(diff)
                 # if destination pose reached
-                if self.move_try_count > 10:
+                if euclidean_dist < 0.1:
                     self.dest_pose = None
                     self.running_move_to_pose = False
-                    if running_move_to_pose:
-                        await self.cancel_move_to_pose()
-                    self.move_try_count = 0
-                elif euclidean_dist < 0.15:
-                    self.dest_pose = None
-                    self.running_move_to_pose = False
+                    self.move_try_timer = 0
                     if running_move_to_pose:
                         await self.cancel_move_to_pose()
                     logging.debug(f"goal reached:{np.round([dest_x, dest_y, dest_theta],3)}-{np.round([cur_x, cur_y, cur_theta],3)}={np.round(diff,4)}->{np.round(euclidean_dist,4)}")
-                    self.move_try_count = 0
+                elif time.time() - self.move_try_timer > 15:
+                    self.dest_pose = None
+                    self.running_move_to_pose = False
+                    self.move_try_timer = 0
+                    if running_move_to_pose:
+                        await self.cancel_move_to_pose()
+                    logging.debug(f"time out:{np.round([dest_x, dest_y, dest_theta],3)}-{np.round([cur_x, cur_y, cur_theta],3)}={np.round(diff,4)}->{np.round(euclidean_dist,4)}")
                 # if goal not reached
                 elif not running_move_to_pose and not self.running_move_to_pose:
                     self.running_move_to_pose = True
                     logging.debug(f"kachakaFrame.short_move_to_pose() starting")
-                    self.move_try_count += 1
                     await self.short_move_to_pose()
             else:
                 await self.async_client.set_robot_velocity(self.linear, self.angular)
@@ -504,32 +553,47 @@ class KachakaFrame():
 
         Returns
         -------
-        tuple
-            float
-                d_linear is the change in linear speed to make w.r.t size of detected human in frame
-            float
-                d_angular is the change in angular speed to make w.r.t horizontal offset from center
-            float
-                (horizontal offset from center) / width of screen
-            float
-                
+        :float:
+            d_linear is the change in linear speed to make w.r.t size of detected human in frame
+
+        :float:
+            d_angular is the change in angular speed to make w.r.t horizontal offset from center
+
+        :float:
+            (horizontal offset from center) / width of screen
+
+        :float:
+            area of bounding box / area of screen
+
+        :float:
+            top left x val of bbox
+
+        :float:
+            top left y val of bbox
+
+        :float:
+            width of bbox
+
+        :float:
+            height of bbox
         """        
         tx, ty, tw, th = self.target_pos
         center_tx, center_ty = tx+tw//2, ty+th//2
-        x_r = (WIN_W/2-center_tx)/WIN_W
-        area_r = (tw*th)/(WIN_W*WIN_H)
+        x_r = (SCREEN_W/2-center_tx)/SCREEN_W
+        area_r = (tw*th)/(SCREEN_W*SCREEN_H)
         d_linear, d_angular = (1-area_r)*AUTO_LINEAR_SPEED, x_r*AUTO_ANGULAR_SPEED
         return d_linear, d_angular, x_r, area_r, tx, ty, tw, th
     
     async def adjust(self):
-        d_linear, d_angular, x_r, area_r, tx, ty, tw, th = await self._prep_auto_control()
-        self.angular = d_angular
-        if ty <= THRE:
-            self.linear = -area_r*AUTO_LINEAR_SPEED
-        elif tw/WIN_W < 0.2 or ty/WIN_H < 0.2 or area_r < 0.4:
-            self.linear = area_r*AUTO_LINEAR_SPEED
-        else:
-            self.linear, self.angular = 0, 0
+        if self.to_adjust:
+            d_linear, d_angular, x_r, area_r, tx, ty, tw, th = await self._prep_auto_control()
+            cx = tx + tw/2
+            d = SCREEN_W/2 - cx
+            if abs(d) < SCREEN_W/10:
+                self.to_adjust = False
+                self.linear = 0
+            else:
+                self.linear = np.sign(d) * 0.05
 
     async def follow(self):
         d_linear, d_angular, x_r, area_r, tx, ty, tw, th = await self._prep_auto_control()
@@ -559,7 +623,7 @@ class KachakaFrame():
         if show_nearest_lidar:
             cv2.putText(self.cv_img, f"{round(self.nearest_scan_dist, 3)}", (20, 140), *lazy_cv2_txt_params)
         if show_id:
-            cv2.putText(self.cv_img, f"ID:{self.id}", (WIN_W-100,40), *lazy_cv2_txt_params)
+            cv2.putText(self.cv_img, f"ID:{self.id}", (SCREEN_W-100,40), *lazy_cv2_txt_params)
 
     async def speak(self, txt:str):
         await self.async_client.speak(txt)
@@ -693,212 +757,128 @@ class KachakaFrame():
         pose = await self.async_client.get_robot_pose()
         return (pose.x, pose.y), pose.theta
     
-    @log_function_data
-    async def adjust_to_front(self):
+    async def get_dist_to_target(self):
         m = self.mp_landmark_model
         img_h, img_w, _ = self.color_image.shape
-        if self.target_found and m.landmarks is not None:
-            # only if dest_pose is empty, to prevent the kachaka robot overloading
-            # and if z_dist is relatively close
-            if self.dest_pose is None:
-                pose_task = asyncio.create_task(self.get_robot_pose())
-                # get distance to target user
-                target_deg = self._find_deg_from_landmarks() - 90
-                """DEPRECATED: find relative z_dist using landmarks from HOE"""
-                # z_dist = m.get_distance_to_hip()
-                # z_dist = m.get_distance_to_shoulder()
-                """find global z_dist from depth sensor"""
-                l = [MPLandmark.NOSE, MPLandmark.LEFT_SHOULDER, MPLandmark.RIGHT_SHOULDER, MPLandmark.LEFT_EYE, 
-                                MPLandmark.RIGHT_EYE, MPLandmark.LEFT_HIP, MPLandmark.RIGHT_HIP]
-                # l = [i for i in range(33)] # search from every available landmark (max 33)
-                l = [m._convert_to_ndarray(i) for i in l]
-                l = [self.realsense.get_depth_at_pixel(int(img_w*x), int(img_h*y), self.depth_image, self.color_image) for x,y,_ in l]
-                l = filter_outliers_IQR(np.array([n for n in l if n is not None],dtype=float))
-                if len(l) > 2: # continue only if valid depths can be retrieved
-                    z_dist = np.average(l) # distance in meter
-                    logging.debug(f"[{self.id}]KachakaFrame.adjust_to_front(). z_dist:{z_dist}, l:{len(l)}/33")
-                    (pose_x, pose_y), pose_theta = await pose_task
-                    pose_deg = np.rad2deg(pose_theta)
-                    # TODO: angular offset in the x-axis between kachaka and camera, will be determined with robot arm later
-                    camera_deg = 90 # camera fixed atm
-                    # get angle to turn by; angle is 0 from vertical line's bottom half and is positive clockwise
-                    target_rad = np.deg2rad(target_deg) + pose_theta # angle to target's orientation
-                    kachaka_look_rad = mod_radians(pose_theta - PI/2)
-                    camera_look_rad = mod_radians(kachaka_look_rad - np.deg2rad(camera_deg)) # angle which camera is looking
-                    camera_target_diff = camera_look_rad - mod_radians(target_rad) + PI # angle difference between camera and target
-                    # check if person is facing towards the camera
-                    if m.facing_camera():
-                        if abs(camera_target_diff) < STRAIGHT_FOV_THRE: # looking straight forward to person
-                            self.to_the_front_side = True
-                            d_step = 0
-                            new_rad = 0
-                            dx, dy = 0, 0
-                            new_pose = None # dont move to destination
-                            print("facing forward", np.rad2deg(camera_target_diff))
-                        else:
-                            d_step = z_dist / (2 * math.cos(camera_target_diff))
-                            new_rad = mod_radians(kachaka_look_rad + (PI - camera_target_diff)/2)
-                            dx, dy = get_coords_from_angle(new_rad, d_step)
-                            new_pose = (pose_x+dx, pose_y+dy, new_rad)
-                    else:
-                        # TODO: step movement in a preset direction
-                        # if person is facing away, simply traverse along circumference in random dir
-                        d_step = z_dist / (2 * math.cos(camera_target_diff))
-                        new_rad = mod_radians(kachaka_look_rad + (PI - camera_target_diff)/2)
-                        dx, dy = get_coords_from_angle(new_rad, d_step)
-                        new_pose = (pose_x+dx, pose_y+dy, new_rad)
-
-                    # assign calculated destination to be moved to
-                    # self.dest_pose = new_pose
-
-                    # print(f"target_deg:{round(target_deg,1)} | camera_deg:{round(camera_deg,1)} | kachaka_deg:{round(np.rad2deg(pose_theta),1)} | angle_to_turn:{round(np.rad2deg(angle_to_turn),1)}")
-                    # visualize
-                    p = {"self.i":self.graph_i, "target_rad":np.rad2deg(target_rad), "camera_look_rad":np.rad2deg(camera_look_rad), "camera_target_diff":np.rad2deg(camera_target_diff), "new_rad":np.rad2deg(new_rad)}
-                    print(p)
-                    await self._visualize_adjusting_to_front(z_dist, target_rad, camera_look_rad, d_step, new_pose, pose_theta, kachaka_look_rad)
-
-    async def circle(self):
-        def d(r): return np.rad2deg(r)
-        m = self.mp_landmark_model
-        img_h, img_w, _ = self.color_image.shape
-        if self.target_found and m.landmarks is not None and self.dest_pose is None:
-            target_rad = PI/2+2*PI-d(self._find_deg_from_landmarks())
-            target_rad = PI/2+2*PI-d(30)
-            # target_rad = -PI
-            l = [MPLandmark.NOSE, MPLandmark.LEFT_SHOULDER, MPLandmark.RIGHT_SHOULDER]
+        _, pitch, _ = self.realsense.get_orientation() # for getting horizontal dist towards person
+        if not self.to_adjust and self.target_found and m.landmarks is not None and self.dest_pose is None:
+            l = [
+                MPLandmark.NOSE, MPLandmark.LEFT_SHOULDER, MPLandmark.RIGHT_SHOULDER, MPLandmark.LEFT_HIP, 
+                MPLandmark.RIGHT_HIP, MPLandmark.LEFT_EYE, MPLandmark.RIGHT_EYE, MPLandmark.LEFT_EAR, 
+                MPLandmark.RIGHT_EAR
+                ]
+            len_l = len(l)
             l = [m._convert_to_ndarray(i) for i in l]
             l = [self.realsense.get_depth_at_pixel(int(img_w*x), int(img_h*y), self.depth_image, self.color_image) for x,y,_ in l]
             l = filter_outliers_IQR(np.array([n for n in l if n is not None],dtype=float))
-            if len(l) == 3: # continue only if valid depths can be retrieved
-                z_dist = np.average(l) # distance in meter
-                if z_dist < 3: # anything larger is too far
-                    logging.debug(f"[{self.id}]KachakaFrame.circle(). z_dist:{z_dist}")
-                    (pose_x, pose_y), pose_theta = await self.get_robot_pose() # pose_theta is in range [-pi, pi]
-                    pose = np.array([pose_x, pose_y])
-                    camera_rad = PI/2 # kachaka to camera yaw offset
-                    kachaka_look_rad = pose_theta + PI/2 # angle kachaka is looking
-                    camera_look_rad = kachaka_look_rad + camera_rad # direction of camera
-                    target_rad = normalize_radians(target_rad + pose_theta) # target angle
-                    # get human world coordinate by using BOTH camera and human orientation
-                    human = pose + get_coords_from_angle(camera_look_rad, z_dist)
-                    # get relative coords
-                    rel_pose = get_coords_from_angle(PI + camera_look_rad, z_dist)
-                    # get theta_diff
-                    d_theta = normalize_radians(target_rad - (camera_look_rad + PI))
-                    print("pose",d(pose_theta), "target",d(target_rad), "camera",d(camera_look_rad), "d_theta",d(d_theta))
-                    # get new coords
-                    step_theta = np.sign(d_theta)*min(PI/4, abs(d_theta))
-                    new_theta = pose_theta + step_theta
-                    print("new_theta",d(new_theta))
-                    rel_new = get_coords_from_angle(new_theta, z_dist)
-                    new = pose + rel_new
-                    # calculate the next angle to look (perpendicular to tangent to circumference at this new point)
-                    self.dest_pose = (*new, np.arctan2(new[0],new[1]) - PI)
+            if len(l) >= int(len_l*0.7): # continue only if valid depths can be retrieved
+                z_dist = np.min(l) # distance in meter
+                if 0.3 < z_dist < 3: # deny distances which are too far
+                    if len(self.consecutive_z_dists) == 0:
+                        self.consecutive_z_dists.append(z_dist)
+                    elif max(np.absolute(np.array(self.consecutive_z_dists)) - z_dist) < 0.5:
+                        self.consecutive_z_dists.append(z_dist)
+                if len(self.consecutive_z_dists) >= 7: # smoothen z_dists to avoid too large of a distance
+                    z_dist = np.median(self.consecutive_z_dists)
+                    # get horizontal dist
+                    self.z_dist = z_dist * np.cos(pitch)
+                else:
+                    self.z_dist = None
+        else:
+            self.consecutive_z_dists = []
+            self.z_dist = None
 
-                    # visualize
-                    fig,ax = plt.subplots(figsize=(12,8))
-                    center = (0,0)
-                    kachaka = rel_pose
-                    arrow_sca = 40
-                    ax.add_artist(plt.Circle(center, z_dist/13, color="green", zorder=5, label="human")) # circle center
-                    ax.add_artist(plt.Circle(center, z_dist, color="blue", fill=False, linestyle="dashed", zorder=5)) # circumference
-                    ax.add_artist(plt.Circle(kachaka, z_dist/13, color="black", zorder=5)) #kachaka obj
-                    # kachaka pov
-                    ax.arrow(*kachaka, *get_coords_from_angle(kachaka_look_rad, z_dist/2), width=z_dist/arrow_sca, shape="full", color="black", linestyle="", label="Kachaka")
-                    # camera pov
-                    ax.arrow(*kachaka, *get_coords_from_angle(camera_look_rad, z_dist/2), width=z_dist/arrow_sca, shape="full", color="yellow", linestyle="", label="camera")
-                    # past target lines
-                    self.visualize_prev_locations.append(target_rad)
-                    if len(self.visualize_prev_locations) > 5:
-                        self.visualize_prev_locations.pop(0)
-                    for i,n in enumerate(self.visualize_prev_locations):
-                        x,y,dx,dy = (*center, *get_coords_from_angle(n, z_dist))
-                        if i == len(self.visualize_prev_locations)-1:
-                            # most recent line to be draw with different colour and full alpha
-                            ax.arrow(x, y, dx, dy, color="red", linestyle="solid", lw=1, width=z_dist/arrow_sca, shape="full", label="present human")
-                            ax.text(x+dx, y+dy-z_dist/10, f"{round(np.rad2deg(n),1)}", fontsize=12, ha='center', color='red', zorder=5)
-                        else:
-                            ax.arrow(x, y, dx, dy, color="orange", linestyle="solid", lw=1, alpha=(255/5 * (i+1))/255, width=z_dist/arrow_sca, label=f"[{i}] past human")
-                            ax.text(x+dx, y+dy-z_dist/10, f"{round(np.rad2deg(n),1)}", fontsize=12, ha='center', color='orange', zorder=5)
-                    # draw boundary for swapping turn angle calculations
-                    # x,y = center
-                    # for c,j in [["red",1],["blue",2]]:
-                    #     for i in (-1,1):
-                    #         dx,dy = get_coords_from_angle(i*j*(STRAIGHT_FOV_THRE)+pose_theta-PI/2, z_dist)
-                    #         ax.plot((x,x+dx), (y,y+dy), color=c, linestyle="dotted", lw=2)
-                    # kachaka destination annotations
-                    ax.plot((kachaka[0], rel_new[0]), (kachaka[1], rel_new[1]), color="purple")
-                    # ax.arrow(*kachaka, *get_coords_from_angle(step_theta, z_dist), color="purple", linestyle="solid", lw=1, width=z_dist/arrow_sca, shape="full", label="destination", alpha=.5)
-                    ax.text(kachaka[0]+z_dist/3, kachaka[1]-z_dist/6, f"To-Face:{round(np.rad2deg(pose_theta),1)}°\nz_dist:{round(z_dist,3)}m", fontsize=12, ha='center', color='purple')
-                    # draw some info text on center
-                    ax.text(0, z_dist/6, f'Radius = {round(z_dist,5)}', fontsize=12, ha='center', color='purple')
-                    c = 1.2
-                    ax.set_xlim(-z_dist*c, z_dist*c)
-                    ax.set_ylim(-z_dist*c, z_dist*c)
-                    ax.set_aspect("equal")
-                    ax.axis("off")
-                    ax.legend()
-                    fig.savefig("stalk/visualize.png", bbox_inches="tight")
-                    # save frame by frame
-                    fig.savefig(f"stalk/img/graph_{str(self.graph_i).zfill(3)}.png")
-                    plt.close(fig)
-                    self.graph_i += 1
+    @log_function_data
+    async def circle(self):
+        def d(r): return round(np.rad2deg(r),3)
+        if self.z_dist is not None:
+            target_deg = self._find_deg_from_landmarks()
+            target_rad = PI/2+2*PI-d(target_deg)
+            self.consecutive_z_dists = []
+            logging.debug(f"[{self.id}]KachakaFrame.circle(). self.z_dist:{self.z_dist}")
+            (pose_x, pose_y), pose_theta = await self.get_robot_pose() # pose_theta is in range [-pi, pi]
+            pose = np.array([pose_x, pose_y])
+            camera_rad = PI/2 # kachaka to camera yaw offset
+            kachaka_look_rad = pose_theta - PI/2 # angle kachaka is looking
+            camera_look_rad = kachaka_look_rad - camera_rad # direction of camera
+            target_rad = normalize_radians(target_rad + pose_theta) # target angle
+            # get human world coordinate by using BOTH camera and human orientation
+            human = pose + get_coords_from_angle(camera_look_rad, self.z_dist)
+            # get relative coords
+            rel_pose = get_coords_from_angle(PI + camera_look_rad, self.z_dist)
+            # get theta_diff
+            d_theta = normalize_radians(target_rad - (camera_look_rad + PI))
+            print("pose",d(pose_theta), "kachaka",d(kachaka_look_rad), "target",d(target_rad), "camera",d(camera_look_rad), "d_theta",d(d_theta))
+            # get new coords
+            step_theta = np.sign(d_theta)*min(PI/8, abs(d_theta))
+            new_theta = pose_theta + step_theta
+            if np.sign(step_theta) == 1: # head to the opposite of where kachaka is looking
+                rel_new = get_coords_from_angle(new_theta + PI, self.z_dist)
+                new = pose + rel_new
+                destination = (*new, new_theta)
+                # reset rel_new for visualization
+                rel_new = get_coords_from_angle(new_theta, self.z_dist)
+            else:
+                rel_new = get_coords_from_angle(new_theta, self.z_dist)
+                new = pose + rel_new
+                destination = (*new, new_theta)
+            # finally check if kachaka is already on the front side of the human
+            if abs(step_theta) < PI/24:
+                self.dest_pose = None
+                logging.debug(f"[{self.id}]Front-side reached")
+            else:
+                # self.dest_pose = destination
+                pass
+            self.to_adjust = True
+            print("step_theta",d(step_theta), "new_theta",d(new_theta))
 
-    async def _visualize_adjusting_to_front(self, z_dist, target_rads, camera_look_rad, step_distance, new_pose, kachaka_theta, kachaka_look_rad): # assumes camera is facing towards target
-        fig,ax = plt.subplots(figsize=(12,8))
-        center = (0,0)
-        kachaka = get_coords_from_angle(kachaka_theta, z_dist)
-        arrow_sca = 40
-        ax.add_artist(plt.Circle(center, z_dist/13, color="green", zorder=5, label="human")) # circle center
-        ax.add_artist(plt.Circle(center, z_dist, color="blue", fill=False, linestyle="dashed", zorder=5)) # circumference
-        ax.add_artist(plt.Circle(kachaka, z_dist/13, color="black", zorder=5)) #kachaka obj
-        # kachaka pov
-        kachaka_arrow = ax.arrow(*kachaka, *get_coords_from_angle(kachaka_look_rad, z_dist/2), width=z_dist/arrow_sca, shape="full", color="black", linestyle="", label="Kachaka")
-        ax.text(kachaka[0]+z_dist/3, kachaka[1], f"Kachaka:{round(mod_radians(np.rad2deg(kachaka_theta)),1)}°", fontsize=12, ha='center', color='black')
-        # camera pov
-        camera_arrow = ax.arrow(*kachaka, *get_coords_from_angle(camera_look_rad, z_dist/2), width=z_dist/arrow_sca, shape="full", color="yellow", linestyle="", label="camera")
-        # past target lines
-        self.visualize_prev_locations.append(normalize_radians(target_rads))
-        if len(self.visualize_prev_locations) > 5:
-            self.visualize_prev_locations.pop(0)
-        for i,n in enumerate(self.visualize_prev_locations):
-            x,y,dx,dy = (*center, *get_coords_from_angle(n, z_dist))
-            if i == len(self.visualize_prev_locations)-1:
-                # most recent line to be draw with different colour and full alpha
-                ax.arrow(x, y, dx, dy, color="red", linestyle="solid", lw=1, width=z_dist/arrow_sca, shape="full", label="present human")
-                ax.text(x+dx, y+dy-z_dist/10, f"{round(np.rad2deg(n),1)}", fontsize=12, ha='center', color='red', zorder=5)
-            else:
-                ax.arrow(x, y, dx, dy, color="orange", linestyle="solid", lw=1, alpha=(255/5 * (i+1))/255, width=z_dist/arrow_sca, label=f"[{i}] past human")
-                ax.text(x+dx, y+dy-z_dist/10, f"{round(np.rad2deg(n),1)}", fontsize=12, ha='center', color='orange', zorder=5)
-        # draw boundary for swapping turn angle calculations
-        x,y = center
-        for c,j in [["red",1],["blue",2]]:
-            for i in (-1,1):
-                dx,dy = get_coords_from_angle(i*j*(STRAIGHT_FOV_THRE)+kachaka_theta, z_dist)
-                ax.plot((x,x+dx), (y,y+dy), color=c, linestyle="dotted", lw=2)
-        # kachaka destination annotations
-        if new_pose is not None:
-            pose_x, pose_y, pose_theta = new_pose
-            if target_rads+PI/2 < 0:
-                dx, dy = get_coords_from_angle(pose_theta-PI/2, step_distance)
-                destination_arrow = ax.arrow(*kachaka, dx, dy, color="purple", linestyle="solid", lw=1, width=z_dist/arrow_sca, shape="full", label="destination", alpha=.5)
-            else:
-                dx, dy = get_coords_from_angle(pose_theta+PI/2, -step_distance)
-                destination_arrow = ax.arrow(*kachaka, dx, dy, color="purple", linestyle="solid", lw=1, width=z_dist/arrow_sca, shape="full", label="destination", alpha=.5)
-            ax.add_artist(plt.Circle((kachaka[0]+dx, kachaka[1]+dy), z_dist/15, color="purple", label="newPose"))
-            ax.text(kachaka[0]+z_dist/3, kachaka[1]-z_dist/6, f"To-Face:{round(np.rad2deg(pose_theta),1)}°\nz_dist:{round(z_dist,3)}m", fontsize=12, ha='center', color='purple')
-        # draw some info text on center
-        ax.text(0, z_dist/6, f'Radius = {round(z_dist,5)}', fontsize=12, ha='center', color='purple')
-        c = 1.2
-        ax.set_xlim(-z_dist*c, z_dist*c)
-        ax.set_ylim(-z_dist*c, z_dist*c)
-        ax.set_aspect("equal")
-        ax.axis("off")
-        ax.legend()
-        fig.savefig("stalk/visualize.png", bbox_inches="tight")
-        # save frame by frame
-        fig.savefig(f"stalk/img/graph_{str(self.graph_i).zfill(3)}.png")
-        self.graph_i += 1
+            def visualize():
+                # visualize
+                fig,ax = plt.subplots(figsize=(12,8))
+                center = (0,0)
+                kachaka = rel_pose
+                arrow_sca = 40
+                ax.add_artist(plt.Circle(center, self.z_dist/13, color="green", zorder=5, label="human")) # circle center
+                ax.text(self.z_dist/10, 0, f"{(0,0)}", fontsize=12, ha='center', color='green', zorder=5)
+                ax.add_artist(plt.Circle(center, self.z_dist, color="blue", fill=False, linestyle="dashed", zorder=5)) # circumference
+                ax.add_artist(plt.Circle(kachaka, self.z_dist/13, color="black", zorder=5)) #kachaka obj
+                ax.text(*kachaka+self.z_dist/10, f"{(round(rel_pose[0],2),round(rel_pose[1],2))}", fontsize=12, ha='center', color='black', zorder=5)
+                # kachaka pov
+                ax.arrow(*kachaka, *get_coords_from_angle(kachaka_look_rad, self.z_dist/2), width=self.z_dist/arrow_sca, shape="full", color="black", linestyle="", label="Kachaka")
+                # camera pov
+                ax.arrow(*kachaka, *get_coords_from_angle(camera_look_rad, self.z_dist/2), width=self.z_dist/arrow_sca, shape="full", color="yellow", linestyle="", label="camera")
+                # past target lines
+                self.visualize_prev_locations.append(target_rad)
+                if len(self.visualize_prev_locations) > 5:
+                    self.visualize_prev_locations.pop(0)
+                for i,n in enumerate(self.visualize_prev_locations):
+                    x,y,dx,dy = (*center, *get_coords_from_angle(n, self.z_dist))
+                    if i == len(self.visualize_prev_locations)-1:
+                        # most recent line to be draw with different colour and full alpha
+                        ax.arrow(x, y, dx, dy, color="red", linestyle="solid", lw=1, width=self.z_dist/arrow_sca, shape="full", label="present human")
+                        ax.text(x+dx, y+dy-self.z_dist/10, f"{round(np.rad2deg(n),1)}", fontsize=12, ha='center', color='red', zorder=5)
+                    else:
+                        ax.arrow(x, y, dx, dy, color="orange", linestyle="solid", lw=1, alpha=(255/5 * (i+1))/255, width=self.z_dist/arrow_sca, label=f"[{i}] past human")
+                        ax.text(x+dx, y+dy-self.z_dist/10, f"{round(np.rad2deg(n),1)}", fontsize=12, ha='center', color='orange', zorder=5)
+                # kachaka destination annotations
+                ax.plot((kachaka[0], rel_new[0]), (kachaka[1], rel_new[1]), color="purple")
+                ax.text(*rel_new+self.z_dist/10, f"{(round(rel_new[0],2), round(rel_new[1],2))}", fontsize=12, ha='center', color='purple', zorder=5)
+                # ax.arrow(*kachaka, *get_coords_from_angle(step_theta, self.z_dist), color="purple", linestyle="solid", lw=1, width=self.z_dist/arrow_sca, shape="full", label="destination", alpha=.5)
+                ax.text(kachaka[0]+self.z_dist/3, kachaka[1]-self.z_dist/6, f"To-Face:{round(np.rad2deg(pose_theta),1)}°\nz_dist:{round(self.z_dist,3)}m", fontsize=12, ha='center', color='purple')
+                # draw some info text on center
+                ax.text(0, self.z_dist/6, f'Radius = {round(self.z_dist,5)}', fontsize=12, ha='center', color='purple')
+                c = 1.2
+                ax.set_xlim(-self.z_dist*c, self.z_dist*c)
+                ax.set_ylim(-self.z_dist*c, self.z_dist*c)
+                ax.set_aspect("equal")
+                ax.axis("off")
+                ax.legend()
+                fig.savefig("stalk/visualize.png", bbox_inches="tight")
+                # save frame by frame
+                fig.savefig(f"stalk/img/graph_{str(self.graph_i).zfill(3)}.png")
+                plt.close(fig)
+                self.graph_i += 1
+            visualize()
 
     def draw_map(self, x, y):
         ROBOT_SIZE_X = 0.389

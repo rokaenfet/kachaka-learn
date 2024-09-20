@@ -57,11 +57,13 @@ think-pad pass:1234
 - [x] smooth switching between navigate and human_detection
 - [ ] make kachaka move to the front side of the person via HOE or pose detection
   - [x] MP pose landmark > orientation for *full body*
-  - [ ] circle around target in fixed distance till face can be seen
+  - [x] circle around target in fixed distance till face can be seen
     - [x] circle angle calculation
     - [x] circle step calculation
-    - [ ] stop when on the front side of person
-  - [ ] adjust distance to target s.t. face can be seen
+    - [x] stop when on the front side of person
+    - [x] calculate horizontal distance from camera to landmark by using camera orientation
+      - [ ] potentially consider the offset in z_dist due to person being away from center of screen (roll)
+  - [x] adjust back and forth (left and right from camera pov) to center person bbox
 - [ ] move kachaka and external devices with mounted laptop
   - [x] kachaka
   - [ ] robot arm
