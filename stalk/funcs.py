@@ -66,6 +66,11 @@ logging.basicConfig(
     filemode="w"    
 )
 
+import asyncio
+import logging
+from functools import wraps
+import numpy as np
+
 def format_value(value):
     """Recursively formats values for logging, handling nested np.ndarray objects."""
     if isinstance(value, np.ndarray):
@@ -77,13 +82,23 @@ def format_value(value):
     else:
         return value
 
+def extract_kachaka_frame_id(args):
+    """Extracts KachakaFrame.id from the class instance if present in the arguments."""
+    if len(args) > 0 and hasattr(args[0], 'id'):
+        return args[0].id
+    return None
+
 def log_function_data(func):
     @wraps(func)
     async def async_wrapper(*args, **kwargs):
+        # Extract KachakaFrame.id if available
+        kachaka_id = extract_kachaka_frame_id(args)
+        kachaka_id_info = f' [KachakaFrame.id={kachaka_id}]' if kachaka_id is not None else ''
+        
         # Format arguments and keyword arguments
         formatted_args = format_value(args)
         formatted_kwargs = format_value(kwargs)
-        logging.info(f'Starting async function {func.__name__} with arguments {formatted_args} and keyword arguments {formatted_kwargs}')
+        logging.info(f'Starting async function {func.__name__}{kachaka_id_info} with arguments {formatted_args} and keyword arguments {formatted_kwargs}')
         
         try:
             # Call the async function and await the result
@@ -91,19 +106,23 @@ def log_function_data(func):
             
             # Format return value
             formatted_result = format_value(result)
-            logging.info(f'Async function {func.__name__} returned {formatted_result}')
+            logging.info(f'Async function {func.__name__}{kachaka_id_info} returned {formatted_result}')
             return result
         except Exception as e:
             # Log any exceptions that occur
-            logging.error(f'Async function {func.__name__} raised an exception: {e}')
+            logging.error(f'Async function {func.__name__}{kachaka_id_info} raised an exception: {e}')
             raise
 
     @wraps(func)
     def sync_wrapper(*args, **kwargs):
+        # Extract KachakaFrame.id if available
+        kachaka_id = extract_kachaka_frame_id(args)
+        kachaka_id_info = f' [KachakaFrame.id={kachaka_id}]' if kachaka_id is not None else ''
+        
         # Format arguments and keyword arguments
         formatted_args = format_value(args)
         formatted_kwargs = format_value(kwargs)
-        logging.info(f'Starting function {func.__name__} with arguments {formatted_args} and keyword arguments {formatted_kwargs}')
+        logging.info(f'Starting function {func.__name__}{kachaka_id_info} with arguments {formatted_args} and keyword arguments {formatted_kwargs}')
         
         try:
             # Call the function and get the result
@@ -111,11 +130,11 @@ def log_function_data(func):
             
             # Format return value
             formatted_result = format_value(result)
-            logging.info(f'Function {func.__name__} returned {formatted_result}')
+            logging.info(f'Function {func.__name__}{kachaka_id_info} returned {formatted_result}')
             return result
         except Exception as e:
             # Log any exceptions that occur
-            logging.error(f'Function {func.__name__} raised an exception: {e}')
+            logging.error(f'Function {func.__name__}{kachaka_id_info} raised an exception: {e}')
             raise
 
     if asyncio.iscoroutinefunction(func):
@@ -379,19 +398,20 @@ class KachakaFrame():
         print(f"{C.GREEN}Got{C.RESET} media pipe landmark detector")
 
         # load realsense camera
-        self.realsense = RealSenseCamera(
-            depth_width=SCREEN_W,
-            depth_height=SCREEN_H,
-            depth_fps=30,
-            rgb_width=SCREEN_W,
-            rgb_height=SCREEN_H,
-            rgb_fps=30,
-        )
+        # self.realsense = RealSenseCamera(
+        #     depth_width=SCREEN_W,
+        #     depth_height=SCREEN_H,
+        #     depth_fps=30,
+        #     rgb_width=SCREEN_W,
+        #     rgb_height=SCREEN_H,
+        #     rgb_fps=30,
+        # )
         self.color_image = None
         self.depth_image = None
 
         # vars for navigations
-        self.locations = self.get_locations(["start","end"])
+        self.locations = self.get_locations(["0","1","2","3","4","fu"])
+        print(self.locations)
         self.nav_i = 0
         self.run = True
         self.run_nav = True
@@ -631,29 +651,19 @@ class KachakaFrame():
     def get_locations(self, locations:str) -> list[str]:
         return [location for location in self.sync_client.get_locations() if location.name in locations]
 
-    async def navigate(self):
-        try:
-            while self.run:
-                if self.target_found == False:
+    @log_function_data
+    async def short_navigate(self):
+        while self.run:
+            nav_running = await self.check_navigate()
+            if self.run_nav:
+                if not nav_running:
                     result = await self.async_client.move_to_location(self.locations[self.nav_i].id)
                     if result.success:
                         self.nav_i = (self.nav_i+1)%len(self.locations)
                     else:
-                        print(self.error_code[result.error_code])
-        except asyncio.CancelledError:
-            print(f'Navigation for Kachaka:{self.id} was cancelled.')
-
-    @log_function_data
-    async def short_navigate(self):
-        try:
-            if self.run:
-                result = await self.async_client.move_to_location(self.locations[self.nav_i].id)
-                if result.success:
-                    self.nav_i = (self.nav_i+1)%len(self.locations)
-                else:
-                    print(self.error_code[result.error_code])
-        except Exception as e:
-            logging.error(f"[{self.id}]{C.RED}Fail{C.RESET} during short_navigate(): {e}")
+                        await self.cancel_navigation()
+            else:
+                await self.cancel_navigation()
 
     @log_function_data
     async def check_navigate(self):

@@ -7,7 +7,7 @@ warnings.filterwarnings("ignore")
 from funcs import *
 
 KACHAKA_IPS = {
-    # 0:"192.168.118.168:26400",
+    0:"192.168.118.168:26400",
     1:"192.168.118.166:26400",
     # 2:"192.168.118.160:26400"
     }
@@ -55,28 +55,44 @@ async def controller(kachakas:list[KachakaFrame]):
     # main loop
     while any([kachaka.run for kachaka in kachakas]):
         mover_tasks = [asyncio.create_task(kachaka.move()) for kachaka in kachakas]
-        await asyncio.gather(
-            *[detection_process(kachaka) for kachaka in kachakas],
-            *[kachaka.get_dist_to_target() for kachaka in kachakas],
-            *[kachaka.adjust() for kachaka in kachakas],
-            *[kachaka.circle() for kachaka in kachakas]
-        )
+        # await asyncio.gather(
+        #     *[detection_process(kachaka) for kachaka in kachakas],
+        #     *[kachaka.get_dist_to_target() for kachaka in kachakas],
+        #     *[kachaka.adjust() for kachaka in kachakas],
+        #     *[kachaka.circle() for kachaka in kachakas]
+        # )
         # display
         if all([kachaka.cv_img is not None for kachaka in kachakas]):
             cv2.imshow(WINDOW_NAME, await display_kachakas(kachakas))
         cv2.waitKey(1)
     cv2.destroyAllWindows()
 
+async def navigator(kachaka: KachakaFrame) -> None:
+    """
+    Continuously checks and manages the navigation process for a single Kachaka robot.
+    Cancels navigation if needed or triggers short navigations based on conditions.
+    """
+    while kachaka.run:
+        nav_running = await kachaka.check_navigate()
+        
+        if kachaka.run_nav:
+            if not nav_running:
+                await kachaka.short_navigate()
+        else:
+            await kachaka.cancel_navigation()
+
 async def main():
     # initiate clients
     kachakas = [KachakaFrame(v, k) for k,v in KACHAKA_IPS.items()]
     monitor_task = asyncio.create_task(object_monitor_key_press(kachakas))
+    navigate_tasks = [asyncio.create_task(navigator(kachaka)) for kachaka in kachakas]
     controller_task = asyncio.create_task(controller(kachakas))
 
     print(f"{C.BLUE}Starting{C.RESET} Script")
     await asyncio.gather(
         controller_task,
-        monitor_task
+        monitor_task,
+        *navigate_tasks
         )
 
     cv2.destroyAllWindows()

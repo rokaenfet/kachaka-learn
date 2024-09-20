@@ -9,11 +9,11 @@ warnings.filterwarnings("ignore")
 
 # Dictionary to store the IP addresses of the Kachaka robots
 KACHAKA_IPS = {
-    # 0: "192.168.118.158:26400",
-    1: "192.168.118.159:26400",
-    # 2: "192.168.118.77:26400"
-}
-WINDOW_NAME = ""
+    0:"192.168.118.168:26400",
+    1:"192.168.118.166:26400",
+    # 2:"192.168.118.160:26400"
+    }
+WINDOW_NAME = "f"
 
 # Constants for detection and navigation logic
 SEARCH_PERIOD = 20  # Iteration threshold for detecting if a face is found
@@ -93,7 +93,7 @@ async def controller(kachakas: List[KachakaFrame]) -> None:
     print(f"{C.GREEN}Loaded{C.RESET} controller()")
 
     # load external camera
-    cap = cv2.VideoCapture(1, cv2.CAP_V4L2)
+    cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
     # cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920) # doesnt work
     # cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080) # doesnt work
     cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
