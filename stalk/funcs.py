@@ -56,6 +56,7 @@ MOVE_EUCLIDEAN_DIST_THRE = 0.03
 STRAIGHT_FOV_THRE = PI/16 # rads
 MAX_D_STEP = 3 # meter
 SCREEN_W, SCREEN_H = 1280, 720
+CHARGE_THRE = (40, 80)
 
 # log
 logging.basicConfig(
@@ -409,19 +410,18 @@ class KachakaFrame():
         self.color_image = None
         self.depth_image = None
 
-        # vars for navigations
-        self.locations = self.get_locations(["0","1","2","3","4","fu"])
-        print(self.locations)
         self.nav_i = 0
         self.run = True
         self.run_nav = True
         self.navigating = False
+        self.location_names = ["0","1","2","3","4","fu"]
 
         # vars for move_to_pos
         self.running_move_to_pose = False
         self.move_try_timer = 0
         self.to_adjust = True
         self.z_dist = None
+        self.charge = False
 
         # var for visualization
         self.visualize_prev_locations = []
@@ -432,7 +432,8 @@ class KachakaFrame():
 
         # map
         self.png_map = self.sync_client.get_png_map()
-        self.png_map_img = Image.open(io.BytesIO(self.png_map.data))
+        self.png_map_img = cv2.cvtColor(np.array(Image.open(io.BytesIO(self.png_map.data))), cv2.COLOR_RGB2BGR)
+        self.past_coords = []
 
         # Loop through the list of files and remove them
         for file in png_files:
@@ -483,46 +484,77 @@ class KachakaFrame():
         # print(np.rad2deg(dest_theta), np.rad2deg(cur_theta), np.rad2deg(angle_diff))
 
     @log_function_data
-    async def move(self):
-        """change kachaka's linear and angular velocity
+    async def _handle_dest_pose(self):
+        dest_x, dest_y, dest_theta = self.dest_pose
+        running_move_to_pose = await self.check_move_to_pose()
+        (cur_x, cur_y), cur_theta = await self.get_robot_pose()
+        if self.move_try_timer == 0:
+            self.move_try_timer = time.time()
+        dest_theta = mod_radians(dest_theta)
+        cur_theta = mod_radians(cur_theta)
+        diff = np.array([cur_x, cur_y, cur_theta])-np.array([dest_x, dest_y, dest_theta])
+        euclidean_dist = np.linalg.norm(diff)
+        # if destination pose reached
+        if euclidean_dist < 0.1:
+            self.dest_pose = None
+            self.running_move_to_pose = False
+            self.move_try_timer = 0
+            if running_move_to_pose:
+                await self.cancel_move_to_pose()
+            logging.debug(f"goal reached:{np.round([dest_x, dest_y, dest_theta],3)}-{np.round([cur_x, cur_y, cur_theta],3)}={np.round(diff,4)}->{np.round(euclidean_dist,4)}")
+        elif time.time() - self.move_try_timer > 120:
+            self.dest_pose = None
+            self.running_move_to_pose = False
+            self.move_try_timer = 0
+            if running_move_to_pose:
+                await self.cancel_move_to_pose()
+            logging.debug(f"time out:{np.round([dest_x, dest_y, dest_theta],3)}-{np.round([cur_x, cur_y, cur_theta],3)}={np.round(diff,4)}->{np.round(euclidean_dist,4)}")
+        # if goal not reached
+        elif not running_move_to_pose and not self.running_move_to_pose:
+            self.running_move_to_pose = True
+            logging.debug(f"kachakaFrame.short_move_to_pose() starting")
+            await self.short_move_to_pose()
 
-        when self.dest_pose is not None:
-            move_to_pose()
+    @log_function_data
+    async def move(self):
+        """movement controller
         """
         if self.run:
-            running_move_to_pose = await self.check_move_to_pose()
-            (cur_x, cur_y), cur_theta = await self.get_robot_pose()
-            # if destination pose is defined and move_to_pose is currently not running, then run move_to_pose()
-            if self.dest_pose is not None:
-                if self.move_try_timer == 0:
-                    self.move_try_timer = time.time()
-                dest_x, dest_y, dest_theta = self.dest_pose
-                dest_theta = mod_radians(dest_theta)
-                cur_theta = mod_radians(cur_theta)
-                diff = np.array([cur_x, cur_y, cur_theta])-np.array([dest_x, dest_y, dest_theta])
-                euclidean_dist = np.linalg.norm(diff)
-                # if destination pose reached
-                if euclidean_dist < 0.1:
-                    self.dest_pose = None
-                    self.running_move_to_pose = False
-                    self.move_try_timer = 0
-                    if running_move_to_pose:
-                        await self.cancel_move_to_pose()
-                    logging.debug(f"goal reached:{np.round([dest_x, dest_y, dest_theta],3)}-{np.round([cur_x, cur_y, cur_theta],3)}={np.round(diff,4)}->{np.round(euclidean_dist,4)}")
-                elif time.time() - self.move_try_timer > 15:
-                    self.dest_pose = None
-                    self.running_move_to_pose = False
-                    self.move_try_timer = 0
-                    if running_move_to_pose:
-                        await self.cancel_move_to_pose()
-                    logging.debug(f"time out:{np.round([dest_x, dest_y, dest_theta],3)}-{np.round([cur_x, cur_y, cur_theta],3)}={np.round(diff,4)}->{np.round(euclidean_dist,4)}")
-                # if goal not reached
-                elif not running_move_to_pose and not self.running_move_to_pose:
-                    self.running_move_to_pose = True
-                    logging.debug(f"kachakaFrame.short_move_to_pose() starting")
-                    await self.short_move_to_pose()
+            battery_percentage, power_supply_status = await self.get_battery()
+            if battery_percentage > CHARGE_THRE[0]:
+                self.charge = False
+            if not self.charge:
+                if battery_percentage < CHARGE_THRE[1]:
+                    self.charge = True
+                # navigate if nothing in priority
+                if self.dest_pose is None and self.run_nav:
+                    await self.short_navigate()
+                # move to position (circling and navigation)
+                elif self.dest_pose is not None:
+                    await self._handle_dest_pose()
+                # linear and angular velocity handle, used in forward/backwards adjusting
+                elif not(self.linear is None and self.angular is None):
+                    linear = self.linear if self.linear is not None else 0
+                    angular = self.angular if self.angular is not None else 0
+                    await self.async_client.set_robot_velocity(linear, angular)
+                    self.linear, self.angular = None, None
             else:
-                await self.async_client.set_robot_velocity(self.linear, self.angular)
+                going_home = await self.check_return_home()
+                if not going_home or power_supply_status != 1:
+                    await self.async_client.set_speaker_volume(7)
+                    await self.async_client.return_home(cancel_all=True)
+                    await self.async_client.set_speaker_volume(0)
+                    await asyncio.sleep(5)
+                if battery_percentage > CHARGE_THRE[1]:
+                    self.charge = False
+
+    async def get_battery(self):
+        result = await self.async_client.get_battery_info() # (battery percentage, power supply status)
+        try:
+            battery_percentage, power_supply_status = result
+            return battery_percentage, power_supply_status
+        except:
+            logging.debug(f"[{self.id}] get_battery() couldn't access battery data")
 
     async def get_image_from_camera(self):
         """get image frame from kachaka's image stream
@@ -648,22 +680,16 @@ class KachakaFrame():
     async def speak(self, txt:str):
         await self.async_client.speak(txt)
 
-    def get_locations(self, locations:str) -> list[str]:
-        return [location for location in self.sync_client.get_locations() if location.name in locations]
+    async def get_locations(self, locations:str) -> list[str]:
+        return [location for location in await self.async_client.get_locations() if location.name in locations]
 
     @log_function_data
     async def short_navigate(self):
-        while self.run:
-            nav_running = await self.check_navigate()
-            if self.run_nav:
-                if not nav_running:
-                    result = await self.async_client.move_to_location(self.locations[self.nav_i].id)
-                    if result.success:
-                        self.nav_i = (self.nav_i+1)%len(self.locations)
-                    else:
-                        await self.cancel_navigation()
-            else:
-                await self.cancel_navigation()
+        if self.run_nav:
+            locations = await self.get_locations(self.location_names)
+            self.dest_pose = (locations[self.nav_i].pose.x, locations[self.nav_i].pose.y, 0)
+            self.nav_i = (self.nav_i+1)%len(self.location_names)
+            logging.debug(f"[{self.id}] navigate to {self.location_names[self.nav_i]}")
 
     @log_function_data
     async def check_navigate(self):
@@ -672,6 +698,10 @@ class KachakaFrame():
         """
         is_command_running, get_running_command, get_last_command_result = await self.check_command_states()
         return is_command_running and get_running_command is not None and get_running_command.move_to_location_command is not None
+
+    async def check_return_home(self):
+        is_command_running, get_running_command, get_last_command_result = await self.check_command_states()
+        return is_command_running and get_running_command is not None and get_running_command.return_home_command is not None
 
     @log_function_data
     async def short_move_to_pose(self):
@@ -890,76 +920,52 @@ class KachakaFrame():
                 self.graph_i += 1
             visualize()
 
-    def draw_map(self, x, y):
-        ROBOT_SIZE_X = 0.389
-        ROBOT_SIZE_Y = 0.24
-        BASE_FOOTPRINT_TO_BODY_RECT_ORIGIN = Affine2D().translate(-0.15, -ROBOT_SIZE_Y / 2)
-        BASE_FOOTPRINT_TO_LASER_FRAME = Affine2D().rotate(np.deg2rad(90)).translate(0.156, 0)
-
-        def draw_robot(ax, fig_origin_to_base_footprint):
-            # draw body
-            return [
-                ax.add_patch(
-                    patches.Rectangle(
-                        (0, 0),
-                        ROBOT_SIZE_X,
-                        ROBOT_SIZE_Y,
-                        facecolor="gray",
-                        transform=BASE_FOOTPRINT_TO_BODY_RECT_ORIGIN
-                        + fig_origin_to_base_footprint,
-                    )
-                ),
-                # draw LED ring
-                ax.add_patch(
-                    patches.Circle(
-                        (0, 0),
-                        radius=0.045,
-                        facecolor="gray",
-                        edgecolor="white",
-                        transform=BASE_FOOTPRINT_TO_LASER_FRAME + fig_origin_to_base_footprint,
-                    )
-                ),
-            ]
-
-        def draw_scan(ax, fig_origin_to_base_footprint, scan):
-            theta = np.linspace(scan.angle_min, scan.angle_max, len(scan.ranges))
-            dist = np.array(scan.ranges)
-            return ax.scatter(
-                dist * np.cos(theta),
-                dist * np.sin(theta),
-                c="red",
-                s=1,
-                transform=BASE_FOOTPRINT_TO_LASER_FRAME + fig_origin_to_base_footprint,
-            )
-
-        fig, ax = plt.subplots(figsize=(10, 10))
-        ax.set_xlabel("x")
-        ax.set_ylabel("y")
-        drawn_artists = []
-
+    async def draw_map(self):
+        ROBOT_SIZE = 20
+        LANDMARK_SIZE = 10
+        _, yaw = await self.get_robot_pose()
         map_image_2d_geometry = MapImage2DGeometry(self.png_map)
+        p = map_image_2d_geometry.calculate_robot_pose_matrix_in_pixel(self.sync_client.get_robot_pose())
+        map_x, map_y = p[0][2], p[1][2]
+        map_coord = np.array([map_x, map_y])
 
-        def update_plot(frame):
-            while drawn_artists:
-                drawn_artists.pop().remove()
+        img = self.png_map_img.copy()
 
-            # ロボットを描画
-            robot_pose = self.sync_sclient.get_robot_pose()
-            image_origin_to_robot = Affine2D(
-                map_image_2d_geometry.calculate_robot_pose_matrix_in_pixel(robot_pose)
-            )
-            robot_artists = draw_robot(ax, image_origin_to_robot + ax.transData)
-            # scanを描画
-            scan = self.sync_client.get_ros_laser_scan()
-            scan_artist = draw_scan(ax, image_origin_to_robot + ax.transData, scan)
+        # draw robot
+        box = np.int32(cv2.boxPoints([map_coord, [ROBOT_SIZE, ROBOT_SIZE], 360-np.rad2deg(yaw)]))
+        img = cv2.fillPoly(img, [box], color=cv2_c.black)
+        
+        # draw robot trail
+        for i, c in enumerate(self.past_coords):
+            img = cv2.circle(img, np.int32(c), int((ROBOT_SIZE/2)*i/len(self.past_coords)), color=cv2_c.red, thickness=-1)
 
-            drawn_artists.extend(robot_artists)
-            drawn_artists.append(scan_artist)
+        # add to robob trail
+        if len(self.past_coords) > 50:
+            self.past_coords.pop(0)
+        self.past_coords.append(map_coord)
 
-        last_target = None
-        ax.imshow(self.png_map_img)
-        func_animation = FuncAnimation(fig, update_plot, interval=100, frames=1000, repeat=False)
-        plt.show()
+        # draw landmarks
+        self.locations = await self.get_locations(self.location_names + ["充電ドック"])
+        for location in self.locations:
+            pose = kachaka_api.pb2.Pose()
+            name, pose.x, pose.y = location.name, location.pose.x, location.pose.y
+            pose.theta = 0
+            p = map_image_2d_geometry.calculate_robot_pose_matrix_in_pixel(pose)
+            org = np.array([p[0][2], p[1][2]], dtype=np.int32)
+            img = cv2.circle(img, org, LANDMARK_SIZE, color=cv2_c.green, thickness=1)
+            name = "charger" if name == "充電ドック" else name
+            img = cv2.putText(img, f"{name}", org, cv2.FONT_HERSHEY_SIMPLEX, 1, color=cv2_c.black, thickness=1)
+
+        # draw battery
+        b_p, power_supply_status = await self.get_battery()
+        b_p /= 100
+        bar_len = 200
+        img = cv2.rectangle(img, [0,0], [bar_len,30], color=cv2_c.gray, thickness=-1)
+        img = cv2.rectangle(img, [0,0], [int(b_p*bar_len),30], color=cv2_c.green, thickness=-1)
+        for c in CHARGE_THRE:
+            img = cv2.line(img, [int(bar_len*c/100), 0], [int(bar_len*c/100), 30], color=cv2_c.black, thickness=1)
+
+        return img
 
 class FaceDetect():
     def __init__(self):
@@ -1236,18 +1242,18 @@ async def get_map_images(kachakas:KachakaFrame):
     imgs = pad_images_to_same_shape(imgs)
     return imgs
 
-def pad_images_to_same_shape(imgs:list):
-    max_w, max_h = 0, 0
-    for img in imgs:
-        w, h, _ = img.shape
-        max_w, max_h = max(max_w, w), max(max_h, h)
-    for i,img in enumerate(imgs):
-        w, h, _ = img.shape
-        pad_w = max_w - w if max_w > w else 0
-        pad_h = max_h - h if max_h > h else 0
-        padded_img = np.pad(img, ((pad_h//2, pad_h//2-pad_h%2), (pad_w//2, pad_w//2-pad_w%2), (0, 0)), mode='constant', constant_values=0)
-        imgs[i] = padded_img
-    return imgs
+def pad_images_to_same_shape(arrays:list[np.ndarray], before=None, after=1, value=0, tie_break=np.floor):
+    shapes = np.array([x.shape for x in arrays])
+    if before is not None:
+        before = np.zeros_like(shapes) + before
+    else:
+        before = np.ones_like(shapes) - after
+    max_size = shapes.max(axis=0, keepdims=True)
+    margin = (max_size - shapes)
+    pad_before = tie_break(margin * before.astype(float)).astype(int)
+    pad_after = margin - pad_before
+    pad = np.stack([pad_before, pad_after], axis=2)
+    return [np.pad(x, w, mode='constant', constant_values=value) for x, w in zip(arrays, pad)]
 
 async def show_map(kachakas):
     while True:
@@ -1272,6 +1278,8 @@ async def object_monitor_key_press(kachakas:list[KachakaFrame]):
             print("Key 'q' pressed. Terminating all tasks...")
             for kachaka in kachakas:
                 kachaka.run = False
+                await kachaka.async_client.set_robot_stop()
+                await kachaka.async_client.set_auto_homing_enabled(True)
             # dir_to_gif()
             break
         elif key.lower() == 'h':
@@ -1348,6 +1356,21 @@ def dir_to_gif():
     except Exception as e:
         logging.error(e)
 
+class cv2_c:
+    black = (0, 0, 0)
+    white = (255, 255, 255)
+    red = (0, 0, 255)
+    green = (0, 255, 0)
+    blue = (255, 0, 0)
+    yellow = (0, 255, 255)
+    cyan = (255, 255, 0)
+    magenta = (255, 0, 255)
+    gray = (128, 128, 128)
+    light_gray = (211, 211, 211)
+    dark_gray = (169, 169, 169)
+    orange = (0, 165, 255)
+    purple = (128, 0, 128)
+    brown = (42, 42, 165)
 class C:
     RED = "\033[31m"
     GREEN = "\033[32m"

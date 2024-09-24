@@ -29,14 +29,24 @@ async def controller(kachakas:list[KachakaFrame]):
         mover_tasks = [asyncio.create_task(kachaka.move()) for kachaka in kachakas]
         await asyncio.gather(*[kachaka.get_image_from_camera() for kachaka in kachakas])
         if all([kachaka.cv_img is not None for kachaka in kachakas]):
-            cv2.imshow(WINDOW_NAME, await display_kachakas(kachakas))
+            image = await get_display_image(kachakas)
+            cv2.imshow(WINDOW_NAME, image)
         cv2.waitKey(1)
     cv2.destroyAllWindows()
+
+async def get_display_image(kachakas:list[KachakaFrame]):
+    a = []
+    for kachaka in kachakas:
+        padded = pad_images_to_same_shape([kachaka.cv_img, await kachaka.draw_map()])
+        a.append(np.concatenate(padded, axis=1))
+    image = np.concatenate(a, axis=0) if len(a) > 0 else a[0]
+    image = image_resize(image, width=SCREEN_W, height=SCREEN_H)
+    return image
 
 async def main():
     # initiate clients
     kachakas = [KachakaFrame(v, k) for k,v in KACHAKA_IPS.items()]
-    navigate_tasks = [asyncio.create_task(kachaka.short_navigate()) for kachaka in kachakas]
+    # navigate_tasks = [asyncio.create_task(kachaka.short_navigate()) for kachaka in kachakas]
     monitor_task = asyncio.create_task(object_monitor_key_press(kachakas))
     controller_task = asyncio.create_task(controller(kachakas))
 
@@ -44,7 +54,6 @@ async def main():
     await asyncio.gather(
         controller_task,
         monitor_task,
-        *navigate_tasks
         )
 
     cv2.destroyAllWindows()
